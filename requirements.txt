@@ -1,0 +1,17 @@
+requests
+beautifulsoup4
+python-dateutil
+pandas
+pyarrow
+openpyxl
+streamlit
+slack_sdk
+matplotlib
+python-pptx
+weasyprint
+pydantic
+tenacity
+lxml
+openai>=1.40.0
+python-dotenv>=1.0.1
+feedparser>=6.0.11
