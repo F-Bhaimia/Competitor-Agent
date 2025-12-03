@@ -4,7 +4,7 @@ An AI-powered competitive intelligence system that automatically crawls, analyze
 
 ## Overview
 
-This tool monitors competitor websites, extracts relevant content, and uses OpenAI's GPT models to classify and summarize articles by impact level and category. It provides automated alerts for high-impact updates and a Streamlit dashboard for reviewing intelligence data.
+This tool monitors competitor websites, extracts relevant content, and uses OpenAI's GPT models to classify and summarize articles by impact level and category. It provides a Streamlit dashboard for reviewing intelligence data.
 
 ## Features
 
@@ -13,7 +13,6 @@ This tool monitors competitor websites, extracts relevant content, and uses Open
 - **AI Classification**: Categorizes articles (Product/Feature, Pricing, M&A, Security, etc.)
 - **Impact Assessment**: Automatically rates articles as High, Medium, or Low impact
 - **AI Summarization**: Generates concise 40-80 word summaries of competitor updates
-- **Slack Integration**: Sends real-time alerts for high-impact competitor news
 - **Visual Dashboard**: Streamlit-based interface for exploring insights with filtering and PDF export
 - **RSS Feed Integration**: Alternative data source via Google News RSS feeds
 - **Scheduled Automation**: PowerShell (Windows) and Bash (Linux/macOS) scripts for nightly updates
@@ -56,12 +55,12 @@ This tool monitors competitor websites, extracts relevant content, and uses Open
 │  │            (Articles with Summary, Category, Impact)              │  │
 │  └───────────────────────────────┬──────────────────────────────────┘  │
 │                                  │                                      │
-│            ┌─────────────────────┼─────────────────────┐               │
-│            ▼                     ▼                     ▼               │
-│  ┌──────────────┐     ┌──────────────┐     ┌──────────────────────┐   │
-│  │  Dashboard   │     │ Slack Alerts │     │    Export/Reports    │   │
-│  │  (Streamlit) │     │ (High Impact)│     │  (CSV, PDF, XLSX)    │   │
-│  └──────────────┘     └──────────────┘     └──────────────────────┘   │
+│            ┌─────────────────────┴─────────────────────┐               │
+│            ▼                                           ▼               │
+│  ┌──────────────┐                           ┌──────────────────────┐   │
+│  │  Dashboard   │                           │    Export/Reports    │   │
+│  │  (Streamlit) │                           │  (CSV, PDF, XLSX)    │   │
+│  └──────────────┘                           └──────────────────────┘   │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -72,7 +71,6 @@ This tool monitors competitor websites, extracts relevant content, and uses Open
 
 - Python 3.9+
 - OpenAI API key
-- (Optional) Slack webhook URL for alerts
 
 ### Setup
 
@@ -106,7 +104,6 @@ playwright install chromium
 5. Create a `.env` file in the project root:
 ```bash
 OPENAI_API_KEY=your_openai_api_key_here
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL  # Optional
 ```
 
 ## Configuration
@@ -116,7 +113,6 @@ Edit `config/monitors.yaml` to customize:
 - **Competitors**: Add or remove competitors and their start URLs
 - **Crawl Settings**: Adjust crawl depth, timeout, and domain restrictions
 - **Impact Levels**: Define which categories trigger alerts
-- **Slack Settings**: Configure webhook and alert thresholds
 
 Example configuration:
 ```yaml
@@ -126,7 +122,6 @@ global:
   max_pages_per_site: 60
   follow_within_domain_only: true
   high_impact_labels: ["Pricing", "M&A", "Security", "Product Update (GA)"]
-  alert_on_impact_levels: ["High"]
 
 competitors:
   - name: "Kicksite"
@@ -250,8 +245,7 @@ competitor_news_monitor/
 4. **Classify**: Uses GPT-4o-mini to categorize and assess impact (11 categories, 3 impact levels)
 5. **Summarize**: Generates concise 40-80 word summaries focusing on strategic signals
 6. **Store**: Saves structured data to CSV in `data/`
-7. **Alert**: Sends Slack notifications for high-impact updates
-8. **Visualize**: Dashboard displays trends, insights, and enables PDF export
+7. **Visualize**: Dashboard displays trends, insights, and enables PDF export
 
 ## Article Classification
 
@@ -292,15 +286,6 @@ competitor_news_monitor/
 - **JSON**: API-friendly format
 - **PDF**: Executive summaries with company logo
 
-## Slack Alerts
-
-When high-impact articles are detected, the system sends Slack notifications including:
-- Competitor name
-- Article title and URL
-- Impact level badge
-- Category classification
-- AI-generated summary
-
 ## Dependencies
 
 ### Core Libraries
@@ -311,7 +296,6 @@ When high-impact articles are detected, the system sends Slack notifications inc
 | `openai` | GPT-4o-mini for classification/summarization |
 | `streamlit` | Interactive dashboard |
 | `pandas` | Data manipulation |
-| `slack_sdk` | Slack integration |
 | `feedparser` | RSS feed parsing |
 | `tenacity` | Retry logic with exponential backoff |
 | `pydantic` | Configuration validation |
@@ -367,11 +351,6 @@ python -m jobs.quarterly_rollup
 - **Quota exceeded**: Check your OpenAI usage dashboard
 - **API failures**: Graceful fallback returns "Other" category and "Low" impact
 
-### Slack Alerts Not Working
-- Verify `SLACK_WEBHOOK_URL` in `.env`
-- Check webhook permissions in Slack workspace settings
-- Test webhook manually with curl
-
 ### Data Issues
 - **Duplicates**: System deduplicates by `(company, source_url)` with SHA-256 hashing
 - **Missing dates**: Falls back from JSON-LD → OpenGraph → None
@@ -386,9 +365,15 @@ python -m jobs.quarterly_rollup
 - **Process Locking**: File locks and OS-level mutexes prevent concurrent runs
 - **Data Atomicity**: Temporary file writes with atomic replace
 
-## License
+## Future Updates
 
-MIT License - See LICENSE file for details.
+- Email notifications for high-impact competitor news
+- Trend analysis and visualization charts
+- Sentiment analysis for article content
+- Competitor comparison reports
+- API endpoint for programmatic access
+- Enhanced dashboard with interactive charts
+- Support for additional data sources
 
 ## Contributing
 
