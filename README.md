@@ -367,13 +367,7 @@ python -m jobs.quarterly_rollup
 
 ## Future Updates
 
-- Email notifications for high-impact competitor news
-- Trend analysis and visualization charts
-- Sentiment analysis for article content
-- Competitor comparison reports
-- API endpoint for programmatic access
-- Enhanced dashboard with interactive charts
-- Support for additional data sources
+*Coming soon*
 
 ## Contributing
 
