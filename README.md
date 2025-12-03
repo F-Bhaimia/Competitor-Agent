@@ -393,7 +393,3 @@ MIT License - See LICENSE file for details.
 ## Contributing
 
 Contributions welcome! Please submit pull requests or open issues for bugs and feature requests.
-
-## Contact
-
-For questions or support, contact: ci@membersolutions.com
