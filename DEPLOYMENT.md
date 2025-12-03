@@ -1,0 +1,436 @@
+# Deployment Guide - Vultr Server
+
+This guide will walk you through deploying the Competitor News Monitor on your Vultr server.
+
+## Prerequisites
+
+- Vultr server with Ubuntu 20.04/22.04 or Debian
+- SSH access to your server
+- Root or sudo privileges
+- Your server IP address or domain name
+
+## Step 1: Connect to Your Vultr Server
+
+```bash
+ssh root@your-server-ip
+# OR
+ssh your-username@your-server-ip
+```
+
+## Step 2: Update System and Install Dependencies
+
+```bash
+# Update package lists
+sudo apt update && sudo apt upgrade -y
+
+# Install required packages
+sudo apt install -y python3 python3-pip python3-venv git nginx ufw screen
+
+# Install system dependencies for Playwright
+sudo apt install -y libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+    libcups2 libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 \
+    libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
+    libcairo2 libasound2 libatspi2.0-0 libwayland-client0
+```
+
+## Step 3: Create Application Directory and Clone Repository
+
+```bash
+# Create application directory
+cd /opt
+sudo mkdir -p competitor-agent
+sudo chown $USER:$USER competitor-agent
+cd competitor-agent
+
+# Clone the repository
+git clone https://github.com/F-Bhaimia/Competitor-Agent.git .
+
+# Verify files are present
+ls -la
+```
+
+## Step 4: Set Up Python Virtual Environment
+
+```bash
+# Create virtual environment
+python3 -m venv .venv
+
+# Activate virtual environment
+source .venv/bin/activate
+
+# Upgrade pip
+pip install --upgrade pip
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Install Playwright browsers
+playwright install chromium
+```
+
+## Step 5: Configure Environment Variables
+
+```bash
+# Create .env file
+nano .env
+```
+
+Add the following content (replace with your actual keys):
+```env
+OPENAI_API_KEY=sk-your-openai-api-key-here
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+```
+
+Save and exit (Ctrl+X, then Y, then Enter)
+
+```bash
+# Secure the .env file
+chmod 600 .env
+
+# Verify it was created
+cat .env
+```
+
+## Step 6: Test the Application
+
+```bash
+# Make sure you're in the virtual environment
+source .venv/bin/activate
+
+# Test a quick crawl
+python3 -m app.crawl
+
+# If that works, test the full pipeline (optional)
+./scripts/run_pipeline.sh
+```
+
+## Step 7: Set Up Systemd Service for Streamlit Dashboard
+
+```bash
+# Create systemd service file
+sudo nano /etc/systemd/system/competitor-dashboard.service
+```
+
+Add the following content (adjust paths if needed):
+```ini
+[Unit]
+Description=Competitor News Monitor Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/competitor-agent
+Environment="PATH=/opt/competitor-agent/.venv/bin"
+ExecStart=/opt/competitor-agent/.venv/bin/streamlit run streamlit_app/Home.py --server.port 8501 --server.address 0.0.0.0
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Save and exit (Ctrl+X, then Y, then Enter)
+
+```bash
+# Reload systemd to recognize new service
+sudo systemctl daemon-reload
+
+# Enable service to start on boot
+sudo systemctl enable competitor-dashboard
+
+# Start the service
+sudo systemctl start competitor-dashboard
+
+# Check service status
+sudo systemctl status competitor-dashboard
+
+# View logs if needed
+sudo journalctl -u competitor-dashboard -f
+```
+
+## Step 8: Configure Nginx Reverse Proxy
+
+```bash
+# Create Nginx configuration
+sudo nano /etc/nginx/sites-available/competitor-dashboard
+```
+
+Add the following content:
+```nginx
+server {
+    listen 80;
+    server_name your-server-ip;  # Replace with your domain or IP
+
+    location / {
+        proxy_pass http://localhost:8501;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 86400;
+    }
+}
+```
+
+Save and exit (Ctrl+X, then Y, then Enter)
+
+```bash
+# Enable the site
+sudo ln -s /etc/nginx/sites-available/competitor-dashboard /etc/nginx/sites-enabled/
+
+# Remove default Nginx site (optional)
+sudo rm /etc/nginx/sites-enabled/default
+
+# Test Nginx configuration
+sudo nginx -t
+
+# Restart Nginx
+sudo systemctl restart nginx
+
+# Enable Nginx to start on boot
+sudo systemctl enable nginx
+```
+
+## Step 9: Configure Firewall
+
+```bash
+# Allow SSH (important - don't lock yourself out!)
+sudo ufw allow 22/tcp
+
+# Allow HTTP
+sudo ufw allow 80/tcp
+
+# Allow HTTPS (for future SSL setup)
+sudo ufw allow 443/tcp
+
+# Enable firewall
+sudo ufw --force enable
+
+# Check firewall status
+sudo ufw status
+```
+
+## Step 10: Set Up Automated Daily Crawls (Cron Job)
+
+```bash
+# Make scripts executable
+chmod +x /opt/competitor-agent/scripts/*.sh
+
+# Edit crontab
+crontab -e
+```
+
+Add the following line (runs daily at 2 AM server time):
+```cron
+0 2 * * * /opt/competitor-agent/scripts/update_daily.sh >> /opt/competitor-agent/logs/cron.log 2>&1
+```
+
+Save and exit
+
+```bash
+# Create logs directory
+mkdir -p /opt/competitor-agent/logs
+
+# Verify cron job was added
+crontab -l
+```
+
+## Step 11: Access Your Dashboard
+
+Open your web browser and go to:
+```
+http://your-server-ip
+```
+
+You should see your Streamlit dashboard running!
+
+## Step 12: (Optional) Set Up SSL with Let's Encrypt
+
+If you have a domain name pointed to your server:
+
+```bash
+# Install Certbot
+sudo apt install certbot python3-certbot-nginx -y
+
+# Get SSL certificate (replace with your domain)
+sudo certbot --nginx -d your-domain.com
+
+# Certbot will automatically configure Nginx for HTTPS
+# Follow the prompts
+
+# Test auto-renewal
+sudo certbot renew --dry-run
+```
+
+## Useful Management Commands
+
+### Check Dashboard Status
+```bash
+sudo systemctl status competitor-dashboard
+```
+
+### Restart Dashboard
+```bash
+sudo systemctl restart competitor-dashboard
+```
+
+### View Dashboard Logs
+```bash
+sudo journalctl -u competitor-dashboard -f
+```
+
+### View Cron Job Logs
+```bash
+tail -f /opt/competitor-agent/logs/cron.log
+```
+
+### Manual Pipeline Run
+```bash
+cd /opt/competitor-agent
+source .venv/bin/activate
+./scripts/run_pipeline.sh
+```
+
+### Update Code from GitHub
+```bash
+cd /opt/competitor-agent
+git pull origin main
+sudo systemctl restart competitor-dashboard
+```
+
+### Check Nginx Status
+```bash
+sudo systemctl status nginx
+```
+
+### View Nginx Error Logs
+```bash
+sudo tail -f /var/log/nginx/error.log
+```
+
+## Troubleshooting
+
+### Dashboard Won't Start
+```bash
+# Check logs
+sudo journalctl -u competitor-dashboard -n 50
+
+# Verify virtual environment
+ls -la /opt/competitor-agent/.venv
+
+# Test Streamlit manually
+cd /opt/competitor-agent
+source .venv/bin/activate
+streamlit run streamlit_app/Home.py
+```
+
+### Can't Access Dashboard from Browser
+```bash
+# Check if service is running
+sudo systemctl status competitor-dashboard
+
+# Check if Nginx is running
+sudo systemctl status nginx
+
+# Check firewall
+sudo ufw status
+
+# Check if port 8501 is listening
+sudo netstat -tulpn | grep 8501
+```
+
+### Playwright/Crawling Issues
+```bash
+# Reinstall Playwright browsers
+cd /opt/competitor-agent
+source .venv/bin/activate
+playwright install chromium
+playwright install-deps
+```
+
+### Permission Issues
+```bash
+# Fix ownership
+sudo chown -R $USER:$USER /opt/competitor-agent
+
+# Fix .env permissions
+chmod 600 /opt/competitor-agent/.env
+```
+
+## Monitoring and Maintenance
+
+### Disk Space
+```bash
+# Check disk usage
+df -h
+
+# Check data directory size
+du -sh /opt/competitor-agent/data/
+```
+
+### Memory Usage
+```bash
+# Check memory
+free -h
+
+# Check processes
+top
+# or
+htop
+```
+
+### Backup Data
+```bash
+# Create backup of data directory
+tar -czf competitor-data-backup-$(date +%Y%m%d).tar.gz /opt/competitor-agent/data/
+
+# Copy to local machine
+scp root@your-server-ip:/root/competitor-data-backup-*.tar.gz ./
+```
+
+## Security Recommendations
+
+1. **Change default SSH port** (optional but recommended)
+2. **Set up SSH key authentication** and disable password login
+3. **Keep system updated**: `sudo apt update && sudo apt upgrade` regularly
+4. **Monitor logs** for suspicious activity
+5. **Restrict Nginx access** by IP if dashboard should be private
+6. **Use strong passwords** for all accounts
+7. **Enable automatic security updates**
+
+## Performance Optimization
+
+### If server runs out of memory:
+```bash
+# Create swap file (2GB)
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+### Limit Playwright memory usage:
+Edit `config/monitors.yaml` and reduce `max_pages_per_site`
+
+## Next Steps
+
+1. Access your dashboard at `http://your-server-ip`
+2. Wait for the first automated crawl (2 AM) or run manually
+3. Monitor the logs to ensure everything is working
+4. Set up SSL if you have a domain
+5. Configure Slack alerts in your `.env` file
+
+## Support
+
+If you encounter issues:
+- Check the logs: `sudo journalctl -u competitor-dashboard -f`
+- Review this guide's Troubleshooting section
+- Check GitHub repository issues
+
+Your Competitor News Monitor is now deployed and running 24/7!
