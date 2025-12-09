@@ -1040,8 +1040,8 @@ elif menu == "Config":
     # Load config from file (no caching - always fresh)
     def load_yaml_config():
         try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                return yaml.safe_load(f)
+            with open(CONFIG_PATH, "r", encoding="utf-8") as cfg_file:
+                return yaml.safe_load(cfg_file)
         except Exception as e:
             st.error(f"Failed to load config: {e}")
             return None
@@ -1203,6 +1203,11 @@ elif menu == "Config":
                             "name": new_comp_name.strip(),
                             "start_urls": new_urls_list
                         })
+                        # Clear the input fields by removing their keys from session state
+                        if "new_comp_name" in st.session_state:
+                            del st.session_state["new_comp_name"]
+                        if "new_comp_urls" in st.session_state:
+                            del st.session_state["new_comp_urls"]
                         st.success(f"Added '{new_comp_name}' - click Save Configuration to persist changes")
                         st.rerun()
                 else:
@@ -1257,8 +1262,8 @@ elif menu == "Config":
 
                     # Write to file with atomic replace
                     tmp_path = CONFIG_PATH + ".tmp"
-                    with open(tmp_path, "w", encoding="utf-8") as f:
-                        yaml.dump(updated_config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+                    with open(tmp_path, "w", encoding="utf-8") as cfg_file:
+                        yaml.dump(updated_config, cfg_file, default_flow_style=False, allow_unicode=True, sort_keys=False)
                     os.replace(tmp_path, CONFIG_PATH)
 
                     log_user_action(get_client_ip(), "config_save", f"Saved config: {len(st.session_state.config_competitors)} competitors")
@@ -1285,10 +1290,8 @@ elif menu == "Config":
         # View Raw YAML (current file on disk)
         with st.expander("View Raw YAML (current file)", expanded=False):
             try:
-                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                    current_yaml = f.read()
+                with open(CONFIG_PATH, "r", encoding="utf-8") as cfg_file:
+                    current_yaml = cfg_file.read()
                 st.code(current_yaml, language="yaml")
             except Exception as e:
                 st.error(f"Could not read config file: {e}")
-
-render_feed(f)
