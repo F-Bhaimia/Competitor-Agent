@@ -1,33 +1,37 @@
 global:
-  user_agent: "MS-CompetitorBot/1.0 (+contact: ci@membersolutions.com)"
+  log_level: DEBUG
+  user_agent: 'MS-CompetitorBot/1.0 (+contact: ci@membersolutions.com)'
   request_timeout_s: 20
   max_pages_per_site: 60
   follow_within_domain_only: true
   dedupe_window_days: 365
   slack_webhook_env: SLACK_WEBHOOK_URL
-  high_impact_labels: ["Pricing", "M&A", "Security", "Product Update (GA)"]
-  alert_on_impact_levels: ["High"]
-
+  high_impact_labels:
+  - Pricing
+  - M&A
+  - Security
+  - Product Update (GA)
+  alert_on_impact_levels:
+  - High
 competitors:
-  - name: "Kicksite"
-    start_urls:
-      - "https://kicksite.com/blog"
-      - "https://kicksite.com/newsletters/"
-  - name: "Spark Membership"
-    start_urls:
-      - "https://sparkmembership.com/blog/"
-  - name: "MyStudio"
-    start_urls:
-      - "https://www.mystudio.io/blog"
-  - name: "ZenPlanner (Daxko)"
-    start_urls:
-      - "https://zenplanner.com/blog/"
-      - "https://www.daxko.com/blog"
-  - name: "GloFox (ABC Fitness)"
-    start_urls:
-      - "https://www.glofox.com/blog/"
-      - "https://www.abcfitness.com/resources/blog/"
-  - name: "ClubOS (Formerly ASF)"
-    start_urls:
-      - "https://www.club-os.com/blog"
-     
+- name: Kicksite
+  start_urls:
+  - https://kicksite.com/blog
+  - https://kicksite.com/newsletters/
+- name: Spark Membership
+  start_urls:
+  - https://sparkmembership.com/blog/
+- name: MyStudio
+  start_urls:
+  - https://www.mystudio.io/blog
+- name: ZenPlanner (Daxko)
+  start_urls:
+  - https://zenplanner.com/blog/
+  - https://www.daxko.com/blog
+- name: GloFox (ABC Fitness)
+  start_urls:
+  - https://www.glofox.com/blog/
+  - https://www.abcfitness.com/resources/blog/
+- name: ClubOS (Formerly ASF)
+  start_urls:
+  - https://www.club-os.com/blog

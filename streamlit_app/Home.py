@@ -2,6 +2,8 @@
 import os
 import sys
 import subprocess
+import signal
+import time
 from html import escape
 import re
 from collections import Counter
@@ -10,6 +12,17 @@ from io import BytesIO
 import pandas as pd
 import streamlit as st
 from openai import OpenAI
+
+from app.logger import (
+    get_system_logger,
+    log_startup,
+    log_user_action,
+    init_client_ip,
+    get_client_ip,
+)
+
+# Initialize logging
+logger = get_system_logger(__name__)
 
 # --- reportlab for PDF ---
 from reportlab.lib.pagesizes import LETTER, letter
@@ -23,9 +36,267 @@ from reportlab.pdfgen import canvas
 DATA_ENRICHED = "data/enriched_updates.csv"
 DATA_RAW = "data/updates.csv"
 LOGO_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "member_solutions_logo.png"))
+SCAN_LOCK_FILE = "data/.scan_in_progress.lock"
 
 st.set_page_config(page_title="Competitor Updates", layout="wide")
-st.title("Competitor Analysis")
+
+# --------------------------- Session & Logging Init ---------------------------
+# Initialize client IP tracking
+init_client_ip()
+
+# Log page view on first load (once per session)
+if "logged_page_view" not in st.session_state:
+    st.session_state.logged_page_view = True
+    client_ip = get_client_ip()
+    log_startup("Streamlit Dashboard")
+    log_user_action(client_ip, "page_view", "Dashboard loaded")
+
+# --------------------------- Scan State Management ---------------------------
+def is_scan_running() -> bool:
+    """Check if a scan is currently in progress by checking lock file."""
+    if os.path.exists(SCAN_LOCK_FILE):
+        try:
+            with open(SCAN_LOCK_FILE, "r") as f:
+                pid = int(f.read().strip())
+            # Check if process is still running
+            if sys.platform == "win32":
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+                if handle:
+                    kernel32.CloseHandle(handle)
+                    return True
+                else:
+                    # Process not running, clean up stale lock
+                    os.remove(SCAN_LOCK_FILE)
+                    return False
+            else:
+                os.kill(pid, 0)  # Signal 0 just checks if process exists
+                return True
+        except (ValueError, ProcessLookupError, OSError, FileNotFoundError):
+            # Process not running or lock file invalid, clean up
+            try:
+                os.remove(SCAN_LOCK_FILE)
+            except FileNotFoundError:
+                pass
+            return False
+    return False
+
+def get_scan_pid() -> int | None:
+    """Get the PID of the running scan process."""
+    if os.path.exists(SCAN_LOCK_FILE):
+        try:
+            with open(SCAN_LOCK_FILE, "r") as f:
+                return int(f.read().strip())
+        except (ValueError, FileNotFoundError):
+            return None
+    return None
+
+def start_scan() -> bool:
+    """Start a new scan process in the background."""
+    if is_scan_running():
+        return False
+
+    client_ip = get_client_ip()
+    try:
+        # Start the scan process
+        if sys.platform == "win32":
+            # Windows: use CREATE_NEW_PROCESS_GROUP for proper process management
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "jobs.daily_scan"],
+                cwd=os.getcwd(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+        else:
+            # Unix: start in new process group
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "jobs.daily_scan"],
+                cwd=os.getcwd(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+
+        # Write lock file with PID
+        os.makedirs(os.path.dirname(SCAN_LOCK_FILE), exist_ok=True)
+        with open(SCAN_LOCK_FILE, "w") as f:
+            f.write(str(proc.pid))
+
+        logger.info(f"Scan started by user, PID: {proc.pid}")
+        log_user_action(client_ip, "scan_start", f"Started scan process PID={proc.pid}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to start scan: {e}")
+        log_user_action(client_ip, "scan_error", f"Failed to start scan: {e}")
+        st.error(f"Failed to start scan: {e}")
+        return False
+
+def cancel_scan() -> bool:
+    """Cancel the running scan process."""
+    pid = get_scan_pid()
+    if pid is None:
+        return False
+
+    client_ip = get_client_ip()
+    try:
+        if sys.platform == "win32":
+            # Windows: use taskkill to terminate process tree
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                         capture_output=True, check=False)
+        else:
+            # Unix: send SIGTERM to process group
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+
+        # Clean up lock file
+        try:
+            os.remove(SCAN_LOCK_FILE)
+        except FileNotFoundError:
+            pass
+
+        logger.info(f"Scan cancelled by user, PID: {pid}")
+        log_user_action(client_ip, "scan_cancel", f"Cancelled scan process PID={pid}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to cancel scan: {e}")
+        log_user_action(client_ip, "scan_error", f"Failed to cancel scan: {e}")
+        st.error(f"Failed to cancel scan: {e}")
+        # Still try to clean up lock file
+        try:
+            os.remove(SCAN_LOCK_FILE)
+        except FileNotFoundError:
+            pass
+        return False
+
+# Initialize session state for scan confirmation dialogs
+if "scan_dialog_state" not in st.session_state:
+    st.session_state.scan_dialog_state = None  # None, "confirm_scan", "confirm_cancel"
+if "confirmation_text" not in st.session_state:
+    st.session_state.confirmation_text = ""
+
+# --------------------------- Header with Scan Button ---------------------------
+header_col1, header_col2 = st.columns([4, 1])
+
+with header_col1:
+    st.title("Competitor Analysis")
+
+with header_col2:
+    scan_running = is_scan_running()
+
+    if scan_running:
+        # Show Cancel Scan button (red/warning style)
+        if st.button("🛑 Cancel Scan", key="btn_cancel_scan", type="secondary", use_container_width=True):
+            st.session_state.scan_dialog_state = "confirm_cancel"
+            st.session_state.confirmation_text = ""
+            st.rerun()
+        st.caption("⏳ Scan in progress...")
+    else:
+        # Show Re-scan button
+        if st.button("🔄 Re-scan", key="btn_rescan", type="primary", use_container_width=True):
+            st.session_state.scan_dialog_state = "confirm_scan"
+            st.session_state.confirmation_text = ""
+            st.rerun()
+
+# --------------------------- Live Scan Logs (when scan is running) ---------------------------
+if scan_running:
+    SYSTEM_LOG_PATH = "logs/system.log"
+    with st.expander("📋 Live Scan Logs", expanded=True):
+        st.caption("Showing latest scan activity (auto-refreshes)")
+
+        # Read last N lines from system.log
+        try:
+            if os.path.exists(SYSTEM_LOG_PATH):
+                with open(SYSTEM_LOG_PATH, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    # Get last 30 lines
+                    recent_lines = lines[-30:] if len(lines) > 30 else lines
+                    log_text = "".join(recent_lines)
+                    st.code(log_text, language="log")
+            else:
+                st.info("No log file found yet. Logs will appear once the scan starts processing.")
+        except Exception as e:
+            st.warning(f"Could not read log file: {e}")
+
+        # Auto-refresh button
+        if st.button("🔄 Refresh Logs", key="btn_refresh_logs"):
+            st.rerun()
+
+# --------------------------- Confirmation Dialogs ---------------------------
+if st.session_state.scan_dialog_state == "confirm_scan":
+    st.warning("### ⚠️ Confirm Re-scan")
+    st.write("This will start a full competitor scan which may take 5-15 minutes.")
+    st.write("**Type `I'm sure` below to confirm:**")
+
+    confirm_input = st.text_input(
+        "Confirmation",
+        value=st.session_state.confirmation_text,
+        key="scan_confirm_input",
+        placeholder="Type: I'm sure",
+        label_visibility="collapsed"
+    )
+    st.session_state.confirmation_text = confirm_input
+
+    col_confirm, col_cancel = st.columns(2)
+
+    with col_confirm:
+        # Only enable if user typed the exact phrase
+        can_proceed = confirm_input.strip().lower() == "i'm sure"
+        if st.button("✅ Start Scan", disabled=not can_proceed, type="primary", key="btn_confirm_scan"):
+            if start_scan():
+                st.session_state.scan_dialog_state = None
+                st.session_state.confirmation_text = ""
+                st.success("Scan started! The page will refresh to show progress.")
+                time.sleep(1)
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.error("Failed to start scan. A scan may already be in progress.")
+
+    with col_cancel:
+        if st.button("❌ Cancel", key="btn_cancel_confirm"):
+            st.session_state.scan_dialog_state = None
+            st.session_state.confirmation_text = ""
+            st.rerun()
+
+    st.divider()
+
+elif st.session_state.scan_dialog_state == "confirm_cancel":
+    st.error("### 🛑 Confirm Cancel Scan")
+    st.write("This will terminate the running scan process. Any partial data will be preserved.")
+    st.write("**Type `I'm sure` below to confirm:**")
+
+    confirm_input = st.text_input(
+        "Confirmation",
+        value=st.session_state.confirmation_text,
+        key="cancel_confirm_input",
+        placeholder="Type: I'm sure",
+        label_visibility="collapsed"
+    )
+    st.session_state.confirmation_text = confirm_input
+
+    col_confirm, col_cancel = st.columns(2)
+
+    with col_confirm:
+        can_proceed = confirm_input.strip().lower() == "i'm sure"
+        if st.button("🛑 Cancel Scan", disabled=not can_proceed, type="primary", key="btn_confirm_cancel"):
+            if cancel_scan():
+                st.session_state.scan_dialog_state = None
+                st.session_state.confirmation_text = ""
+                st.success("Scan cancelled.")
+                time.sleep(1)
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.error("Failed to cancel scan.")
+
+    with col_cancel:
+        if st.button("⬅️ Go Back", key="btn_back_from_cancel"):
+            st.session_state.scan_dialog_state = None
+            st.session_state.confirmation_text = ""
+            st.rerun()
+
+    st.divider()
 
 # Reload button (clears Streamlit cache)
 if st.button("Reload Data", key="reload_button"):
@@ -302,6 +573,43 @@ with st.expander("Debug: data health", expanded=False):
         st.cache_data.clear()
         st.rerun()
 
+# --------------------------- Filter Change Tracking ---------------------------
+# Initialize previous filter state for change detection
+if "prev_filters" not in st.session_state:
+    st.session_state.prev_filters = {}
+
+def log_filter_change(filter_name: str, old_val, new_val):
+    """Log filter changes when values differ, with specific details."""
+    if old_val != new_val and old_val is not None:
+        client_ip = get_client_ip()
+
+        # Format the change message based on filter type
+        if isinstance(new_val, (list, tuple)) and isinstance(old_val, (list, tuple)):
+            # For multi-select filters, show what was added/removed
+            old_set = set(old_val) if old_val else set()
+            new_set = set(new_val) if new_val else set()
+            added = new_set - old_set
+            removed = old_set - new_set
+
+            changes = []
+            if added:
+                changes.append(f"+{list(added)}")
+            if removed:
+                changes.append(f"-{list(removed)}")
+            change_str = ", ".join(changes) if changes else f"{len(new_val)} selected"
+        elif filter_name == "search":
+            change_str = f'"{new_val}"' if new_val else "(cleared)"
+        elif filter_name == "date_range":
+            if new_val and len(new_val) == 2:
+                change_str = f"{new_val[0]} to {new_val[1]}"
+            else:
+                change_str = str(new_val)
+        else:
+            change_str = str(new_val)
+
+        log_user_action(client_ip, f"filter_{filter_name}", change_str)
+        logger.debug(f"Filter '{filter_name}' changed: {old_val} -> {new_val}")
+
 st.sidebar.header("Filters")
 companies = sorted([c for c in df["company"].dropna().unique()])
 sel_companies = st.sidebar.multiselect("Company", companies, default=companies)
@@ -324,6 +632,22 @@ date_from, date_to = st.sidebar.date_input(
 )
 
 query = st.sidebar.text_input("Search title/summary...", "")
+
+# Log filter changes
+log_filter_change("companies", st.session_state.prev_filters.get("companies"), sel_companies)
+log_filter_change("categories", st.session_state.prev_filters.get("categories"), sel_categories)
+log_filter_change("impacts", st.session_state.prev_filters.get("impacts"), sel_impacts)
+log_filter_change("date_range", st.session_state.prev_filters.get("date_range"), (date_from, date_to))
+log_filter_change("search", st.session_state.prev_filters.get("search"), query)
+
+# Update previous filter state
+st.session_state.prev_filters = {
+    "companies": sel_companies,
+    "categories": sel_categories,
+    "impacts": sel_impacts,
+    "date_range": (date_from, date_to),
+    "search": query,
+}
 
 # --------------------------- Filtered Frame ---------------------------
 f = df.copy()
@@ -352,14 +676,27 @@ SECTION_LABELS = [
     "Export",               # Download filtered CSV
     "Manual Edits",         # editable grid
     "Executive Summary",    # Generate + Download PDF
-    "Data Quality Tools",  # Enrichment + QA together
+    "Data Quality Tools",   # Enrichment + QA together
+    "Config",               # Configuration settings
 ]
+
+# Track previous menu selection
+if "prev_menu" not in st.session_state:
+    st.session_state.prev_menu = None
+
 menu = st.radio(
     "Navigation",
     SECTION_LABELS,
     horizontal=True,
     key="top_menu_radio",
 )
+
+# Log navigation changes
+if st.session_state.prev_menu != menu:
+    if st.session_state.prev_menu is not None:  # Don't log initial load
+        log_user_action(get_client_ip(), "navigation", f"Navigated to: {menu}")
+        logger.debug(f"Navigation: {st.session_state.prev_menu} -> {menu}")
+    st.session_state.prev_menu = menu
 
 # --------------------------- Section: Posts by Competitor ---------------------------
 if menu == "Posts by Competitor":
@@ -465,7 +802,8 @@ elif menu == "Export":
         export_df["date_ref"] = pd.to_datetime(export_df["date_ref"], errors="coerce", utc=True).dt.strftime("%m-%d-%Y")
     csv_bytes = export_df.to_csv(index=False).encode("utf-8")
     fname = f"competitor_updates_{pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d')}.csv"
-    st.download_button("Download filtered rows as CSV", data=csv_bytes, file_name=fname, mime="text/csv", key="btn_export_csv")
+    if st.download_button("Download filtered rows as CSV", data=csv_bytes, file_name=fname, mime="text/csv", key="btn_export_csv"):
+        log_user_action(get_client_ip(), "export_csv", f"Exported {len(export_df)} rows to CSV")
 
 # --------------------------- Section: Data Quality Tools (Advanced) ---------------------------
 elif menu == "Data Quality Tools":
@@ -492,6 +830,8 @@ elif menu == "Data Quality Tools":
         st.caption(f"Pending in current view: {_pending_enrichment_count(display) if not display.empty else 0}")
 
         if st.button("Run Enrichment Now", type="primary", key="btn_enrich_now_adv"):
+            client_ip = get_client_ip()
+            log_user_action(client_ip, "enrichment_start", "Started enrichment job")
             try:
                 with st.spinner("Running enrichment job…"):
                     proc = subprocess.run(
@@ -502,14 +842,17 @@ elif menu == "Data Quality Tools":
                     )
                 if proc.returncode == 0:
                     st.success("Enrichment complete")
+                    log_user_action(client_ip, "enrichment_complete", "Enrichment completed successfully")
                     if proc.stdout:
                         st.code(proc.stdout[-3000:], language="bash")
                 else:
                     st.error("Enrichment failed")
+                    log_user_action(client_ip, "enrichment_error", f"Enrichment failed: exit code {proc.returncode}")
                     if proc.stderr:
                         st.code(proc.stderr[-3000:], language="bash")
             except Exception as e:
                 st.error(f"Error launching enrichment: {e}")
+                log_user_action(client_ip, "enrichment_error", f"Error launching enrichment: {e}")
             finally:
                 st.cache_data.clear()
                 st.rerun()
@@ -583,6 +926,7 @@ elif menu == "Manual Edits":
         )
 
         if st.button("Save Edits to Enriched File", type="primary", key="btn_save_edits"):
+            client_ip = get_client_ip()
             try:
                 ENRICHED_PATH = "data/enriched_updates.csv"
                 RAW_PATH = "data/updates.csv"
@@ -615,10 +959,12 @@ elif menu == "Manual Edits":
                 os.replace(tmp_path, ENRICHED_PATH)
 
                 st.success(f"Saved edits to {ENRICHED_PATH}")
+                log_user_action(client_ip, "manual_edit", f"Saved manual edits to {ENRICHED_PATH}")
                 st.cache_data.clear()
                 st.rerun()
             except Exception as e:
                 st.error(f"Failed to save edits: {e}")
+                log_user_action(client_ip, "edit_error", f"Failed to save edits: {e}")
 
 # --------------------------- Section: Executive Summary ---------------------------
 elif menu == "Executive Summary":
@@ -655,8 +1001,10 @@ elif menu == "Executive Summary":
 
     if gen_click:
         # Build blocks from the CURRENT filtered frame (f)
+        log_user_action(get_client_ip(), "exec_summary_gen", f"Generating executive summary for {len(f)} rows")
         blocks = build_exec_blocks(f, max_highlights=3)
         st.session_state["exec_blocks"] = blocks
+        log_user_action(get_client_ip(), "exec_summary_done", f"Generated {len(blocks)} company summaries")
 
     if st.session_state["exec_blocks"]:
         for b in st.session_state["exec_blocks"]:
@@ -678,5 +1026,269 @@ elif menu == "Executive Summary":
                     st.write("**Highlights:**")
                     for t in b["highlights"]:
                         st.markdown(f"- {t}")
+
+# --------------------------- Section: Config ---------------------------
+elif menu == "Config":
+    import yaml
+    import copy
+
+    st.subheader("Configuration Settings")
+    st.caption("Edit application settings stored in `config/monitors.yaml`")
+
+    CONFIG_PATH = "config/monitors.yaml"
+
+    # Load config from file (no caching - always fresh)
+    def load_yaml_config():
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f)
+        except Exception as e:
+            st.error(f"Failed to load config: {e}")
+            return None
+
+    # Initialize session state for config editing
+    if "config_competitors" not in st.session_state:
+        config = load_yaml_config()
+        if config:
+            st.session_state.config_competitors = copy.deepcopy(config.get("competitors", []))
+            st.session_state.config_loaded = True
+        else:
+            st.session_state.config_competitors = []
+            st.session_state.config_loaded = False
+
+    config = load_yaml_config()
+
+    if config:
+        # Global Settings
+        with st.expander("Global Settings", expanded=True):
+            st.markdown("**Logging & Crawl Settings**")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                # Log level
+                current_log_level = config.get("global", {}).get("log_level", "INFO")
+                log_level_options = ["DEBUG", "INFO", "WARNING", "ERROR"]
+                try:
+                    log_level_index = log_level_options.index(current_log_level.upper())
+                except ValueError:
+                    log_level_index = 1  # Default to INFO
+                new_log_level = st.selectbox(
+                    "Log Level",
+                    options=log_level_options,
+                    index=log_level_index,
+                    help="DEBUG: Verbose logging for troubleshooting. INFO: Normal operation.",
+                    key="cfg_log_level"
+                )
+
+                # Request timeout
+                current_timeout = config.get("global", {}).get("request_timeout_s", 20)
+                new_timeout = st.number_input(
+                    "Request Timeout (seconds)",
+                    min_value=5,
+                    max_value=120,
+                    value=int(current_timeout),
+                    help="How long to wait for a page to load before giving up.",
+                    key="cfg_timeout"
+                )
+
+            with col2:
+                # Max pages per site
+                current_max_pages = config.get("global", {}).get("max_pages_per_site", 60)
+                new_max_pages = st.number_input(
+                    "Max Pages Per Site",
+                    min_value=10,
+                    max_value=500,
+                    value=int(current_max_pages),
+                    help="Maximum number of pages to crawl per competitor.",
+                    key="cfg_max_pages"
+                )
+
+                # Dedupe window
+                current_dedupe = config.get("global", {}).get("dedupe_window_days", 365)
+                new_dedupe = st.number_input(
+                    "Dedupe Window (days)",
+                    min_value=30,
+                    max_value=730,
+                    value=int(current_dedupe),
+                    help="Days to look back for duplicate detection.",
+                    key="cfg_dedupe"
+                )
+
+            # User agent
+            current_ua = config.get("global", {}).get("user_agent", "")
+            new_ua = st.text_input(
+                "User Agent",
+                value=current_ua,
+                help="The user agent string sent when crawling websites.",
+                key="cfg_user_agent"
+            )
+
+            # Follow within domain only
+            current_follow = config.get("global", {}).get("follow_within_domain_only", True)
+            new_follow = st.checkbox(
+                "Follow Within Domain Only",
+                value=current_follow,
+                help="Only follow links that stay within the competitor's domain.",
+                key="cfg_follow_domain"
+            )
+
+        # Competitors Management
+        with st.expander("Competitors", expanded=True):
+            st.markdown("**Monitored Competitors**")
+            st.caption(f"Currently monitoring {len(st.session_state.config_competitors)} competitors")
+
+            # Build list of competitors from session state with editable fields
+            updated_competitors = []
+            for i, comp in enumerate(st.session_state.config_competitors):
+                with st.container():
+                    col1, col2, col3 = st.columns([2, 3, 0.5])
+                    with col1:
+                        new_name = st.text_input(
+                            "Name" if i == 0 else f"Name {i+1}",
+                            value=comp.get("name", ""),
+                            key=f"comp_name_{i}",
+                            label_visibility="visible" if i == 0 else "collapsed"
+                        )
+                    with col2:
+                        urls_str = "\n".join(comp.get("start_urls", []))
+                        new_urls_str = st.text_area(
+                            "Start URLs (one per line)" if i == 0 else f"URLs {i+1}",
+                            value=urls_str,
+                            height=68,
+                            key=f"comp_urls_{i}",
+                            label_visibility="visible" if i == 0 else "collapsed"
+                        )
+                    with col3:
+                        st.write("")  # Spacing
+                        if st.button("🗑️", key=f"del_comp_{i}", help=f"Remove {comp.get('name', 'competitor')}"):
+                            st.session_state.config_competitors.pop(i)
+                            st.rerun()
+
+                    # Update the competitor data
+                    if new_name.strip():
+                        updated_competitors.append({
+                            "name": new_name.strip(),
+                            "start_urls": [u.strip() for u in new_urls_str.strip().split("\n") if u.strip()]
+                        })
+                    st.divider()
+
+            # Update session state with edited values
+            st.session_state.config_competitors = updated_competitors
+
+            # Add new competitor section
+            st.markdown("**Add New Competitor**")
+            new_comp_col1, new_comp_col2 = st.columns([2, 3])
+            with new_comp_col1:
+                new_comp_name = st.text_input(
+                    "New Competitor Name",
+                    value="",
+                    key="new_comp_name",
+                    placeholder="e.g., Acme Corp"
+                )
+            with new_comp_col2:
+                new_comp_urls = st.text_area(
+                    "Start URLs (one per line)",
+                    value="",
+                    key="new_comp_urls",
+                    height=68,
+                    placeholder="https://example.com/blog"
+                )
+
+            if st.button("➕ Add Competitor", key="btn_add_competitor"):
+                if new_comp_name.strip() and new_comp_urls.strip():
+                    new_urls_list = [u.strip() for u in new_comp_urls.strip().split("\n") if u.strip()]
+                    if new_urls_list:
+                        st.session_state.config_competitors.append({
+                            "name": new_comp_name.strip(),
+                            "start_urls": new_urls_list
+                        })
+                        st.success(f"Added '{new_comp_name}' - click Save Configuration to persist changes")
+                        st.rerun()
+                else:
+                    st.warning("Please enter both a name and at least one URL.")
+
+        # Alert Settings
+        with st.expander("Alert Settings", expanded=False):
+            st.markdown("**Impact & Alert Configuration**")
+
+            # High impact labels
+            current_high_impact = config.get("global", {}).get("high_impact_labels", [])
+            new_high_impact = st.text_area(
+                "High Impact Labels (one per line)",
+                value="\n".join(current_high_impact),
+                height=100,
+                help="Categories considered high impact.",
+                key="cfg_high_impact"
+            )
+
+            # Alert on impact levels
+            current_alert_levels = config.get("global", {}).get("alert_on_impact_levels", ["High"])
+            new_alert_levels = st.multiselect(
+                "Alert on Impact Levels",
+                options=["High", "Medium", "Low"],
+                default=[lvl for lvl in current_alert_levels if lvl in ["High", "Medium", "Low"]],
+                help="Which impact levels should trigger alerts.",
+                key="cfg_alert_levels"
+            )
+
+        # Save Configuration
+        st.divider()
+        col_save, col_reset = st.columns([1, 1])
+
+        with col_save:
+            if st.button("💾 Save Configuration", type="primary", key="btn_save_config"):
+                try:
+                    # Build updated config from current form values
+                    updated_config = {
+                        "global": {
+                            "log_level": new_log_level,
+                            "user_agent": new_ua,
+                            "request_timeout_s": int(new_timeout),
+                            "max_pages_per_site": int(new_max_pages),
+                            "follow_within_domain_only": new_follow,
+                            "dedupe_window_days": int(new_dedupe),
+                            "slack_webhook_env": config.get("global", {}).get("slack_webhook_env", "SLACK_WEBHOOK_URL"),
+                            "high_impact_labels": [l.strip() for l in new_high_impact.strip().split("\n") if l.strip()],
+                            "alert_on_impact_levels": new_alert_levels,
+                        },
+                        "competitors": st.session_state.config_competitors
+                    }
+
+                    # Write to file with atomic replace
+                    tmp_path = CONFIG_PATH + ".tmp"
+                    with open(tmp_path, "w", encoding="utf-8") as f:
+                        yaml.dump(updated_config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+                    os.replace(tmp_path, CONFIG_PATH)
+
+                    log_user_action(get_client_ip(), "config_save", f"Saved config: {len(st.session_state.config_competitors)} competitors")
+                    logger.info(f"Configuration saved: log_level={new_log_level}, max_pages={new_max_pages}, competitors={len(st.session_state.config_competitors)}")
+
+                    st.success(f"Configuration saved to {CONFIG_PATH}!")
+
+                    # Reload log level dynamically
+                    from app.logger import set_log_level
+                    set_log_level(new_log_level)
+
+                except Exception as e:
+                    st.error(f"Failed to save configuration: {e}")
+                    logger.error(f"Config save failed: {e}")
+                    log_user_action(get_client_ip(), "config_error", f"Failed to save: {e}")
+
+        with col_reset:
+            if st.button("🔄 Reload from File", key="btn_reload_config"):
+                # Clear session state and reload from file
+                if "config_competitors" in st.session_state:
+                    del st.session_state.config_competitors
+                st.rerun()
+
+        # View Raw YAML (current file on disk)
+        with st.expander("View Raw YAML (current file)", expanded=False):
+            try:
+                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    current_yaml = f.read()
+                st.code(current_yaml, language="yaml")
+            except Exception as e:
+                st.error(f"Could not read config file: {e}")
 
 render_feed(f)

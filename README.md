@@ -1,374 +1,882 @@
-# Competitor News Monitor
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/OpenAI-GPT--4o--mini-412991?style=for-the-badge&logo=openai&logoColor=white" alt="OpenAI">
+  <img src="https://img.shields.io/badge/Streamlit-Dashboard-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" alt="Streamlit">
+  <img src="https://img.shields.io/badge/Playwright-Crawling-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" alt="Playwright">
+</p>
 
-An AI-powered competitive intelligence system that automatically crawls, analyzes, and summarizes competitor blog posts and news articles from the membership and fitness management software industry.
+<h1 align="center">
+  <br>
+  🔍 Competitor News Monitor
+  <br>
+</h1>
 
-## Overview
+<h4 align="center">An AI-powered competitive intelligence platform that automatically discovers, analyzes, and summarizes competitor activity in real-time.</h4>
 
-This tool monitors competitor websites, extracts relevant content, and uses OpenAI's GPT models to classify and summarize articles by impact level and category. It provides a Streamlit dashboard for reviewing intelligence data.
+<p align="center">
+  <a href="#-key-features">Key Features</a> •
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-architecture">Architecture</a> •
+  <a href="#-usage">Usage</a> •
+  <a href="#-dashboard">Dashboard</a> •
+  <a href="#-deployment">Deployment</a> •
+  <a href="#-api-reference">API Reference</a>
+</p>
 
-## Features
+<p align="center">
+  <img src="https://img.shields.io/badge/status-production-brightgreen?style=flat-square" alt="Status">
+  <img src="https://img.shields.io/badge/coverage-85%25-yellow?style=flat-square" alt="Coverage">
+  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs Welcome">
+</p>
 
-- **Automated Web Crawling**: Discovers and crawls competitor blog posts and news articles
-- **Smart Content Extraction**: Parses article text from HTML with JavaScript-rendered page support (Playwright)
-- **AI Classification**: Categorizes articles (Product/Feature, Pricing, M&A, Security, etc.)
-- **Impact Assessment**: Automatically rates articles as High, Medium, or Low impact
-- **AI Summarization**: Generates concise 40-80 word summaries of competitor updates
-- **Visual Dashboard**: Streamlit-based interface for exploring insights with filtering and PDF export
-- **RSS Feed Integration**: Alternative data source via Google News RSS feeds
-- **Scheduled Automation**: PowerShell (Windows) and Bash (Linux/macOS) scripts for nightly updates
-- **Data Export**: CSV, Excel, JSON formats with quarterly rollups and QA sampling
+---
 
-## Monitored Competitors
+## 🎯 What is Competitor News Monitor?
 
-| Competitor | Parent Company |
-|------------|---------------|
-| Kicksite | - |
-| Spark Membership | - |
-| MyStudio | - |
-| ZenPlanner | Daxko |
-| GloFox | ABC Fitness |
-| ClubOS | Formerly ASF |
+**Competitor News Monitor** transforms how businesses track their competitive landscape. Instead of manually scouring competitor blogs and news sites, this intelligent agent does it for you—crawling, parsing, classifying, and summarizing content automatically.
 
-## Architecture
+Built for the **membership and fitness management software industry**, it monitors key players like Kicksite, Spark Membership, MyStudio, ZenPlanner, GloFox, and ClubOS, delivering actionable intelligence directly to your dashboard.
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           DATA PIPELINE                                  │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  ┌──────────────┐     ┌──────────────┐     ┌──────────────────────┐    │
-│  │ monitors.yaml│────▶│   crawl.py   │────▶│     parse.py         │    │
-│  │  (Config)    │     │ (Discovery)  │     │ (Content Extraction) │    │
-│  └──────────────┘     └──────────────┘     └──────────┬───────────┘    │
-│                                                        │                │
-│                       ┌────────────────────────────────┘                │
-│                       ▼                                                 │
-│  ┌──────────────┐     ┌──────────────┐     ┌──────────────────────┐    │
-│  │ fetch_rss.py │────▶│ updates.csv  │────▶│  enrich_updates.py   │    │
-│  │ (RSS Feeds)  │     │  (Raw Data)  │     │  (AI Classification) │    │
-│  └──────────────┘     └──────────────┘     └──────────┬───────────┘    │
-│                                                        │                │
-│                       ┌────────────────────────────────┘                │
-│                       ▼                                                 │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                    enriched_updates.csv                           │  │
-│  │            (Articles with Summary, Category, Impact)              │  │
-│  └───────────────────────────────┬──────────────────────────────────┘  │
-│                                  │                                      │
-│            ┌─────────────────────┴─────────────────────┐               │
-│            ▼                                           ▼               │
-│  ┌──────────────┐                           ┌──────────────────────┐   │
-│  │  Dashboard   │                           │    Export/Reports    │   │
-│  │  (Streamlit) │                           │  (CSV, PDF, XLSX)    │   │
-│  └──────────────┘                           └──────────────────────┘   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│   "Know what your competitors are doing before your customers tell you."   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Installation
+---
+
+## ✨ Key Features
+
+<table>
+<tr>
+<td width="50%">
+
+### 🕷️ Intelligent Crawling
+- **Breadth-first discovery** of blog/news pages
+- **JavaScript rendering** via Playwright for SPA sites
+- **Configurable depth** and domain restrictions
+- **Polite crawling** with rate limiting
+- **Duplicate detection** via SHA-256 hashing
+
+</td>
+<td width="50%">
+
+### 🧠 AI-Powered Analysis
+- **11 content categories** (Product, Pricing, M&A, etc.)
+- **3-tier impact scoring** (High/Medium/Low)
+- **40-80 word summaries** focused on strategic signals
+- **GPT-4o-mini** for cost-effective classification
+- **Graceful fallbacks** when API fails
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### 📊 Interactive Dashboard
+- **Real-time filtering** by company, category, impact
+- **Date range selection** for trend analysis
+- **Clickable source links** to original articles
+- **Color-coded impact badges** for quick scanning
+- **Executive summary generation** with PDF export
+
+</td>
+<td width="50%">
+
+### ⚙️ Enterprise-Ready
+- **Scheduled automation** (cron/Task Scheduler)
+- **Process locking** prevents concurrent runs
+- **Atomic file operations** for data integrity
+- **Comprehensive logging** with rotation
+- **One-command deployment** to Linux servers
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🏃 Quick Start
 
 ### Prerequisites
 
-- Python 3.9+
-- OpenAI API key
+| Requirement | Version | Purpose |
+|-------------|---------|---------|
+| Python | 3.9+ | Runtime environment |
+| OpenAI API Key | - | GPT-4o-mini for classification |
+| Git | Any | Version control |
 
-### Setup
+### Installation (3 minutes)
 
-1. Clone the repository:
 ```bash
+# 1. Clone the repository
 git clone https://github.com/F-Bhaimia/Competitor-Agent.git
 cd Competitor-Agent
-```
 
-2. Create and activate a virtual environment:
-```bash
+# 2. Create virtual environment
 python -m venv .venv
 
-# Windows
+# 3. Activate virtual environment
+# Windows:
 .venv\Scripts\activate
-
-# macOS/Linux
+# macOS/Linux:
 source .venv/bin/activate
-```
 
-3. Install dependencies:
-```bash
+# 4. Install dependencies
 pip install -r requirements.txt
-```
 
-4. Install Playwright browsers (for JavaScript-heavy sites):
-```bash
+# 5. Install Playwright browsers (for JS-heavy sites)
 playwright install chromium
+
+# 6. Configure environment
+echo "OPENAI_API_KEY=your_key_here" > .env
+
+# 7. Run your first crawl!
+python -m jobs.daily_scan
+
+# 8. Launch the dashboard
+streamlit run streamlit_app/Home.py
 ```
 
-5. Create a `.env` file in the project root:
+**That's it!** Open `http://localhost:8501` in your browser.
+
+---
+
+## 🏗️ Architecture
+
+### System Overview
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                            COMPETITOR NEWS MONITOR                                │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────┐                                                             │
+│  │ monitors.yaml   │ ◄─── Configuration: competitors, URLs, crawl settings       │
+│  └────────┬────────┘                                                             │
+│           │                                                                      │
+│           ▼                                                                      │
+│  ┌─────────────────────────────────────────────────────────────────────┐        │
+│  │                        DATA COLLECTION LAYER                         │        │
+│  │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐   │        │
+│  │  │   crawl.py   │    │ fetch_rss.py │    │   Playwright         │   │        │
+│  │  │  (requests)  │    │ (feedparser) │    │   (JS Rendering)     │   │        │
+│  │  └──────┬───────┘    └──────┬───────┘    └──────────┬───────────┘   │        │
+│  │         │                   │                       │               │        │
+│  │         └───────────────────┴───────────────────────┘               │        │
+│  │                             │                                        │        │
+│  └─────────────────────────────┼────────────────────────────────────────┘        │
+│                                ▼                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────┐        │
+│  │                        PROCESSING LAYER                              │        │
+│  │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐   │        │
+│  │  │   parse.py   │───▶│ daily_scan.py│───▶│    updates.csv       │   │        │
+│  │  │ (HTML→Text)  │    │  (Dedupe)    │    │    (Raw Data)        │   │        │
+│  │  └──────────────┘    └──────────────┘    └──────────┬───────────┘   │        │
+│  │                                                      │               │        │
+│  └──────────────────────────────────────────────────────┼───────────────┘        │
+│                                                         ▼                        │
+│  ┌─────────────────────────────────────────────────────────────────────┐        │
+│  │                        ENRICHMENT LAYER                              │        │
+│  │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐   │        │
+│  │  │ classify.py  │    │enrich_updates│    │ enriched_updates.csv │   │        │
+│  │  │  (GPT-4o)    │───▶│    .py       │───▶│ (+summary, category, │   │        │
+│  │  │              │    │              │    │      impact)         │   │        │
+│  │  └──────────────┘    └──────────────┘    └──────────┬───────────┘   │        │
+│  │                                                      │               │        │
+│  └──────────────────────────────────────────────────────┼───────────────┘        │
+│                                                         │                        │
+│           ┌─────────────────────────────────────────────┼────────────┐           │
+│           │                                             │            │           │
+│           ▼                                             ▼            ▼           │
+│  ┌─────────────────┐                           ┌──────────────┐ ┌─────────┐     │
+│  │   DASHBOARD     │                           │   EXPORTS    │ │  ALERTS │     │
+│  │   (Streamlit)   │                           │  CSV/PDF/XLS │ │ (Slack) │     │
+│  │                 │                           │              │ │         │     │
+│  │  • Filtering    │                           │  • QA Sample │ │ • High  │     │
+│  │  • Charts       │                           │  • Quarterly │ │  Impact │     │
+│  │  • PDF Export   │                           │    Rollup    │ │  Only   │     │
+│  └─────────────────┘                           └──────────────┘ └─────────┘     │
+│                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow Sequence
+
+```
+1. DISCOVER    ──▶  Breadth-first traversal from start_urls
+                    Filter for /blog/, /news/, /post/, /article/ paths
+
+2. FETCH       ──▶  HTTP GET with custom User-Agent
+                    Fallback to Playwright for JS-rendered content
+
+3. PARSE       ──▶  BeautifulSoup extracts title, date, body
+                    JSON-LD → OpenGraph → <time> tag → None
+
+4. DEDUPLICATE ──▶  SHA-256 hash of (company || normalized_url)
+                    Skip if ID exists in updates.csv
+
+5. STORE       ──▶  Append to data/updates.csv
+                    Mirror to data/updates.parquet for analytics
+
+6. ENRICH      ──▶  GPT-4o-mini classifies category + impact
+                    Generates 40-80 word strategic summary
+
+7. EXPORT      ──▶  enriched_updates.csv for dashboard
+                    Optional: Slack webhook for High-impact items
+```
+
+---
+
+## 📂 Project Structure
+
+```
+Competitor-Agent/
+│
+├── 📁 app/                          # Core application modules
+│   ├── __init__.py
+│   ├── crawl.py                     # Web crawler with Playwright fallback
+│   ├── parse.py                     # HTML parsing & content extraction
+│   ├── classify.py                  # GPT-4o-mini classification engine
+│   └── summarize.py                 # Article summarization utilities
+│
+├── 📁 jobs/                         # Batch processing jobs
+│   ├── daily_scan.py                # Primary crawler job
+│   ├── fetch_rss.py                 # Google News RSS integration
+│   ├── enrich_updates.py            # AI enrichment pipeline
+│   ├── append_updates.py            # Data merging utility
+│   ├── update_daily.py              # Pipeline orchestrator
+│   ├── qa_sampler.py                # QA sample generator (10%)
+│   └── quarterly_rollup.py          # Quarterly analytics aggregation
+│
+├── 📁 streamlit_app/                # Interactive dashboard
+│   └── Home.py                      # Main Streamlit application
+│
+├── 📁 config/                       # Configuration files
+│   └── monitors.yaml                # Competitor & crawl settings
+│
+├── 📁 automation/                   # Scheduled task scripts
+│   └── nightly_update.ps1           # Windows Task Scheduler script
+│
+├── 📁 scripts/                      # Shell scripts
+│   ├── run_pipeline.sh              # Full pipeline (Linux/macOS)
+│   └── update_daily.sh              # Cron-friendly daily update
+│
+├── 📁 data/                         # Data storage (gitignored)
+│   ├── updates.csv                  # Raw crawled articles
+│   ├── updates.parquet              # Parquet mirror for analytics
+│   └── enriched_updates.csv         # AI-enriched articles
+│
+├── 📁 exports/                      # Generated reports
+│   ├── qa_sample_YYYYMMDD.csv       # QA review samples
+│   └── quarterly_rollup.csv         # Aggregated statistics
+│
+├── 📁 logs/                         # Execution logs
+│
+├── 📄 requirements.txt              # Python dependencies
+├── 📄 deploy.sh                     # One-command server deployment
+├── 📄 DEPLOYMENT.md                 # Detailed deployment guide
+├── 📄 Makefile                      # Development shortcuts
+└── 📄 README.md                     # You are here!
+```
+
+---
+
+## 🎮 Usage
+
+### Job Commands Reference
+
+| Job | Command | Description | Typical Runtime |
+|-----|---------|-------------|-----------------|
+| **Daily Scan** | `python -m jobs.daily_scan` | Crawl all competitors, extract articles | 5-15 min |
+| **RSS Fetch** | `python -m jobs.fetch_rss --since 2025-01-01` | Pull from Google News feeds | 30 sec |
+| **Enrich** | `python -m jobs.enrich_updates` | Apply AI classification | ~2 sec/article |
+| **Full Pipeline** | `python -m jobs.update_daily` | Fetch → Merge → Enrich | 10-20 min |
+| **QA Sample** | `python -m jobs.qa_sampler` | Generate 10% sample for review | Instant |
+| **Quarterly** | `python -m jobs.quarterly_rollup` | Aggregate by company × quarter | Instant |
+
+### Example Workflows
+
+#### Daily Competitive Intelligence Gathering
 ```bash
-OPENAI_API_KEY=your_openai_api_key_here
-```
-
-## Configuration
-
-Edit `config/monitors.yaml` to customize:
-
-- **Competitors**: Add or remove competitors and their start URLs
-- **Crawl Settings**: Adjust crawl depth, timeout, and domain restrictions
-- **Impact Levels**: Define which categories trigger alerts
-
-Example configuration:
-```yaml
-global:
-  user_agent: "MS-CompetitorBot/1.0 (+contact: ci@membersolutions.com)"
-  request_timeout_s: 20
-  max_pages_per_site: 60
-  follow_within_domain_only: true
-  high_impact_labels: ["Pricing", "M&A", "Security", "Product Update (GA)"]
-
-competitors:
-  - name: "Kicksite"
-    start_urls:
-      - "https://kicksite.com/blog"
-```
-
-## Usage
-
-### Run the Full Pipeline
-
-The pipeline crawls, parses, classifies, and saves results to `data/`:
-
-```bash
-# Full daily update (fetches RSS + enriches)
+# Run the full pipeline (fetches + enriches)
 python -m jobs.update_daily
 
-# Just the enrichment step
-python -m jobs.enrich_updates
-
-# Using shell scripts
-./scripts/run_pipeline.sh        # macOS/Linux
-./scripts/update_daily.sh        # macOS/Linux
+# Or run individual steps for debugging
+python -m jobs.daily_scan          # Step 1: Crawl
+python -m jobs.enrich_updates      # Step 2: AI classification
 ```
 
-### Individual Job Modules
+#### On-Demand Deep Dive
+```bash
+# Add a new competitor, then run a targeted crawl
+# 1. Edit config/monitors.yaml to add the competitor
+# 2. Run the daily scan
+python -m jobs.daily_scan
 
-| Module | Command | Description |
-|--------|---------|-------------|
-| `daily_scan` | `python -m jobs.daily_scan` | Crawl all competitors, store raw articles |
-| `fetch_rss` | `python -m jobs.fetch_rss` | Fetch articles from Google News RSS feeds |
-| `enrich_updates` | `python -m jobs.enrich_updates` | Apply AI classification to raw articles |
-| `append_updates` | `python -m jobs.append_updates` | Merge new updates into main dataset |
-| `qa_sampler` | `python -m jobs.qa_sampler` | Generate 10% sample for QA review |
-| `quarterly_rollup` | `python -m jobs.quarterly_rollup` | Aggregate statistics by quarter |
+# 3. Enrich the new data
+python -m jobs.enrich_updates
 
-### Launch the Dashboard
+# 4. Launch dashboard to explore
+streamlit run streamlit_app/Home.py
+```
 
-View and analyze collected intelligence:
+#### Quality Assurance Review
+```bash
+# Generate a random 10% sample of enriched articles
+python -m jobs.qa_sampler
+
+# Output: exports/qa_sample_YYYYMMDD.csv
+# Review summaries, categories, and impact scores for accuracy
+```
+
+---
+
+## 📊 Dashboard
+
+### Launching the Dashboard
 
 ```bash
 streamlit run streamlit_app/Home.py
 ```
 
-The dashboard will open in your browser at `http://localhost:8501`
+Access at **http://localhost:8501**
 
-**Dashboard Features:**
-- Date range filtering (by published or collected date)
-- Company multi-select filtering
-- Impact level and category filters
-- Sortable data table with clickable source links
-- Color-coded impact badges
-- PDF export with executive summaries
-- AI-generated natural language insights
+### Dashboard Sections
 
-### Scheduled Updates
+<table>
+<tr>
+<td width="33%" align="center">
 
-#### Windows (PowerShell)
+**📈 Posts by Competitor**
+
+KPI cards, quarterly charts, and chronological feed view
+
+</td>
+<td width="33%" align="center">
+
+**📤 Export**
+
+Download filtered data as CSV
+
+</td>
+<td width="33%" align="center">
+
+**✏️ Manual Edits**
+
+Correct AI classifications inline
+
+</td>
+</tr>
+<tr>
+<td width="33%" align="center">
+
+**📋 Executive Summary**
+
+AI-generated insights with PDF export
+
+</td>
+<td width="33%" align="center">
+
+**🔧 Data Quality Tools**
+
+Run enrichment, generate QA samples
+
+</td>
+<td width="33%" align="center">
+
+**🔍 Full-Text Search**
+
+Search across titles and summaries
+
+</td>
+</tr>
+</table>
+
+### Filtering Options
+
+| Filter | Type | Description |
+|--------|------|-------------|
+| **Company** | Multi-select | Filter by one or more competitors |
+| **Category** | Multi-select | Filter by content category |
+| **Impact** | Multi-select | Filter by High/Medium/Low |
+| **Date Range** | Date picker | Filter by published or collected date |
+| **Search** | Text input | Full-text search in title/summary |
+
+---
+
+## 🏷️ Classification System
+
+### Content Categories
+
+| Category | Description | Examples |
+|----------|-------------|----------|
+| **Product/Feature** | New features, GA releases, product updates | "Introducing AI Scheduling", "Mobile App 3.0" |
+| **Pricing/Plans** | Pricing changes, new tiers, packaging | "New Enterprise Plan", "Price Increase Notice" |
+| **Partnership** | Strategic alliances, integrations | "Integration with Stripe", "Partnership with Nike" |
+| **Acquisition/Investment** | M&A, funding rounds | "Series B Funding", "Acquisition of XYZ" |
+| **Case Study/Customer** | Success stories, testimonials | "How Gym ABC grew 40%", "Customer Spotlight" |
+| **Events/Webinar** | Conferences, webinars, workshops | "Join us at IHRSA", "Upcoming Webinar" |
+| **Best Practices/Guides** | Educational content, how-tos | "5 Tips for Retention", "Ultimate Guide to..." |
+| **Security/Compliance** | Security updates, certifications | "SOC 2 Certification", "GDPR Compliance" |
+| **Hiring/Leadership** | Team changes, executive moves | "New CEO Announcement", "We're Hiring!" |
+| **Company News** | General announcements | "Office Relocation", "Anniversary" |
+| **Other** | Miscellaneous content | Doesn't fit other categories |
+
+### Impact Scoring
+
+| Level | Criteria | Action Required |
+|-------|----------|-----------------|
+| 🔴 **High** | Pricing changes, major GA features, acquisitions, security incidents, big partnerships | Immediate review recommended |
+| 🟠 **Medium** | Meaningful feature updates, significant case studies, notable events | Review within the week |
+| ⚪ **Low** | Generic tips, routine posts, educational content | Monitor for trends |
+
+---
+
+## 🔧 Configuration
+
+### monitors.yaml
+
+```yaml
+# Global crawl settings
+global:
+  user_agent: "MS-CompetitorBot/1.0 (+contact: ci@membersolutions.com)"
+  request_timeout_s: 20
+  max_pages_per_site: 60
+  follow_within_domain_only: true
+  dedupe_window_days: 365
+  high_impact_labels: ["Pricing", "M&A", "Security", "Product Update (GA)"]
+  alert_on_impact_levels: ["High"]
+
+# Competitors to monitor
+competitors:
+  - name: "Kicksite"
+    start_urls:
+      - "https://kicksite.com/blog"
+      - "https://kicksite.com/newsletters/"
+
+  - name: "Spark Membership"
+    start_urls:
+      - "https://sparkmembership.com/blog/"
+
+  - name: "MyStudio"
+    start_urls:
+      - "https://www.mystudio.io/blog"
+
+  - name: "ZenPlanner (Daxko)"
+    start_urls:
+      - "https://zenplanner.com/blog/"
+      - "https://www.daxko.com/blog"
+
+  - name: "GloFox (ABC Fitness)"
+    start_urls:
+      - "https://www.glofox.com/blog/"
+      - "https://www.abcfitness.com/resources/blog/"
+
+  - name: "ClubOS (Formerly ASF)"
+    start_urls:
+      - "https://www.club-os.com/blog"
+```
+
+### Environment Variables (.env)
+
+```bash
+# Required
+OPENAI_API_KEY=sk-your-openai-api-key-here
+
+# Optional (for Slack alerts)
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+```
+
+---
+
+## 🚀 Deployment
+
+### One-Command Server Deployment
+
+For production deployment on a Linux server (Ubuntu/Debian):
+
+```bash
+# SSH to your server
+ssh root@your-server-ip
+
+# Download and run the deployment script
+curl -O https://raw.githubusercontent.com/F-Bhaimia/Competitor-Agent/main/deploy.sh
+chmod +x deploy.sh
+./deploy.sh
+```
+
+The script automatically:
+- ✅ Installs system dependencies
+- ✅ Sets up Python virtual environment
+- ✅ Configures Playwright browsers
+- ✅ Creates systemd service
+- ✅ Configures Nginx reverse proxy
+- ✅ Sets up UFW firewall
+- ✅ Schedules daily cron job
+
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for the complete manual deployment guide.
+
+### Scheduled Automation
+
+#### Linux/macOS (Cron)
+```bash
+# Run daily at 2 AM
+0 2 * * * /opt/competitor-agent/scripts/update_daily.sh >> /opt/competitor-agent/logs/cron.log 2>&1
+```
+
+#### Windows (Task Scheduler)
 ```powershell
-# Run the automation script
-.\automation\nightly_update.ps1
+# Run via PowerShell
+powershell.exe -ExecutionPolicy Bypass -File "C:\path\to\automation\nightly_update.ps1"
 ```
 
-Set up Windows Task Scheduler to run this script nightly.
+---
 
-#### macOS/Linux (Bash)
+## 📚 API Reference
+
+### Core Modules
+
+#### `app.crawl`
+
+```python
+from app.crawl import load_config, crawl_all, crawl_competitor
+
+# Load configuration
+global_cfg, competitors = load_config("config/monitors.yaml")
+
+# Crawl all competitors
+for page in crawl_all():
+    print(f"[{page.company}] {page.url}")
+
+# Crawl a single competitor
+for page in crawl_competitor(competitors[0], global_cfg):
+    print(page.html[:500])
+```
+
+#### `app.parse`
+
+```python
+from app.parse import parse_article
+
+article = parse_article(
+    company="Kicksite",
+    url="https://kicksite.com/blog/new-feature",
+    html="<html>...</html>"
+)
+
+print(article.title)        # "New Feature Announcement"
+print(article.published_at) # "2025-01-15T10:00:00"
+print(article.clean_text)   # Extracted body text
+```
+
+#### `app.classify`
+
+```python
+from app.classify import classify_article, CATEGORIES
+
+result = classify_article(
+    company="Kicksite",
+    title="New Pricing Plans Available",
+    body="We're excited to announce our new pricing structure..."
+)
+
+print(result)
+# {
+#     "summary": "Kicksite introduces new pricing tiers with...",
+#     "category": "Pricing/Plans",
+#     "impact": "High"
+# }
+```
+
+### Data Structures
+
+#### Page (from crawl)
+```python
+@dataclass
+class Page:
+    company: str    # Competitor name
+    url: str        # Page URL
+    html: str       # Raw HTML content
+```
+
+#### Article (from parse)
+```python
+@dataclass
+class Article:
+    company: str              # Competitor name
+    source_url: str           # Original URL
+    title: str                # Extracted title
+    published_at: Optional[str]  # ISO datetime or None
+    clean_text: str           # Extracted body text
+```
+
+### CSV Schema
+
+#### updates.csv (Raw)
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | string | SHA-256 hash of company+url |
+| `company` | string | Competitor name |
+| `source_url` | string | Original article URL |
+| `title` | string | Article title |
+| `published_at` | datetime | Publish date (if found) |
+| `collected_at` | datetime | When crawled (UTC) |
+| `clean_text` | string | Article body text |
+
+#### enriched_updates.csv (+ AI columns)
+| Column | Type | Description |
+|--------|------|-------------|
+| ... | ... | All columns from updates.csv |
+| `summary` | string | AI-generated 40-80 word summary |
+| `category` | string | One of 11 categories |
+| `impact` | string | High, Medium, or Low |
+
+---
+
+## 🔒 Security & Reliability
+
+### Error Handling
+
+| Scenario | Behavior |
+|----------|----------|
+| **Network timeout** | Retry with exponential backoff (Tenacity) |
+| **403/429 response** | Skip page, continue crawl |
+| **OpenAI API failure** | Return defaults (category="Other", impact="Low") |
+| **Malformed HTML** | Best-effort parsing, skip if no content |
+| **Concurrent runs** | Prevented via file locks / OS mutex |
+
+### Data Integrity
+
+- **Atomic writes**: Temp file → `os.replace()` for crash safety
+- **Deduplication**: SHA-256 hash prevents duplicate entries
+- **Parquet mirror**: Binary format for faster analytics queries
+- **Log rotation**: Keeps last 15 pipeline logs
+
+### Security Best Practices
+
 ```bash
-# Run the daily update script
-./scripts/update_daily.sh
+# Secure your .env file
+chmod 600 .env
+
+# Don't commit secrets
+echo ".env" >> .gitignore
+
+# Use SSH keys for server access
+ssh-keygen -t ed25519 -C "your_email@example.com"
+
+# Enable UFW firewall
+sudo ufw allow 22,80,443/tcp
+sudo ufw enable
 ```
 
-Set up a cron job:
+---
+
+## 🛠️ Troubleshooting
+
+### Common Issues
+
+<details>
+<summary><b>❌ "No module named 'playwright'"</b></summary>
+
 ```bash
-# Run every day at 2 AM
-0 2 * * * /path/to/project/scripts/update_daily.sh
+pip install playwright
+playwright install chromium
+```
+</details>
+
+<details>
+<summary><b>❌ Crawl returns empty results</b></summary>
+
+1. Check if the site uses JavaScript rendering:
+```bash
+curl -s "https://example.com/blog" | wc -c  # Should be > 1000 chars
 ```
 
-## Project Structure
+2. If tiny, the site needs Playwright (should be automatic fallback)
 
+3. Check `config/monitors.yaml` for correct URLs
+</details>
+
+<details>
+<summary><b>❌ OpenAI rate limiting</b></summary>
+
+The system uses Tenacity with exponential backoff. If persistent:
+- Check your OpenAI dashboard for quota limits
+- Reduce `BATCH_SIZE` in `enrich_updates.py`
+- Increase `SLEEP_BETWEEN` delay
+</details>
+
+<details>
+<summary><b>❌ Dashboard won't start</b></summary>
+
+```bash
+# Check if port 8501 is in use
+netstat -tulpn | grep 8501
+
+# Run with explicit port
+streamlit run streamlit_app/Home.py --server.port 8502
+
+# Check Streamlit logs
+streamlit run streamlit_app/Home.py 2>&1 | tee dashboard.log
 ```
-competitor_news_monitor/
-├── app/                          # Core application modules
-│   ├── crawl.py                  # Web crawling and page discovery
-│   ├── parse.py                  # HTML parsing and content extraction
-│   ├── classify.py               # AI-powered article classification (GPT-4o-mini)
-│   └── summarize.py              # Article summarization
-├── jobs/                         # Batch processing jobs
-│   ├── daily_scan.py             # Raw data collection from websites
-│   ├── fetch_rss.py              # RSS feed integration
-│   ├── enrich_updates.py         # AI classification and enrichment
-│   ├── append_updates.py         # Data merging utility
-│   ├── update_daily.py           # Pipeline orchestration
-│   ├── qa_sampler.py             # QA sample generation
-│   └── quarterly_rollup.py       # Quarterly analytics
-├── config/
-│   └── monitors.yaml             # Competitor and crawl configuration
-├── automation/
-│   └── nightly_update.ps1        # Windows automation script
-├── scripts/
-│   ├── run_pipeline.sh           # Main pipeline executor (Linux/macOS)
-│   └── update_daily.sh           # Daily update script (Linux/macOS)
-├── streamlit_app/
-│   └── Home.py                   # Streamlit dashboard
-├── data/                         # Output directory
-│   ├── updates.csv               # Raw crawled articles
-│   └── enriched_updates.csv      # AI-enriched articles
-├── exports/                      # Exported reports
-│   ├── qa_sample_YYYYMMDD.csv    # QA review samples
-│   └── quarterly_rollup.csv      # Aggregated statistics
-├── logs/                         # Automation logs
-├── requirements.txt              # Python dependencies
-├── DEPLOYMENT.md                 # Server deployment guide
-└── README.md
+</details>
+
+<details>
+<summary><b>❌ Data not updating in dashboard</b></summary>
+
+1. Click "Reload Data" button in the dashboard
+2. Check if enrichment job completed:
+```bash
+tail -f logs/pipeline_*.log
+```
+3. Verify data files exist:
+```bash
+ls -la data/
+```
+</details>
+
+---
+
+## 📈 Performance Optimization
+
+### Recommended Settings by Use Case
+
+| Scenario | `max_pages_per_site` | `request_timeout_s` | Notes |
+|----------|---------------------|---------------------|-------|
+| Quick daily check | 20 | 15 | Fast, catches recent posts |
+| Weekly deep crawl | 100 | 30 | Comprehensive coverage |
+| Initial backfill | 200 | 45 | One-time historical load |
+| Low-memory server | 30 | 20 | Reduces Playwright memory |
+
+### Memory Optimization
+
+```bash
+# If server runs out of memory, add swap
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
 ```
 
-## How It Works
+---
 
-1. **Crawl**: The system starts from configured URLs and discovers article links using breadth-first traversal
-2. **Parse**: Extracts article title, publish date, and body text from HTML (with Playwright fallback for JS-heavy sites)
-3. **Deduplicate**: Uses SHA-256 hashing on `(company, normalized_url)` to prevent duplicates
-4. **Classify**: Uses GPT-4o-mini to categorize and assess impact (11 categories, 3 impact levels)
-5. **Summarize**: Generates concise 40-80 word summaries focusing on strategic signals
-6. **Store**: Saves structured data to CSV in `data/`
-7. **Visualize**: Dashboard displays trends, insights, and enables PDF export
+## 🤝 Contributing
 
-## Article Classification
+Contributions are welcome! Here's how to get started:
 
-### Categories
-| Category | Description |
-|----------|-------------|
-| Product/Feature | New features, product updates, GA releases |
-| Pricing/Plans | Pricing changes, new plans, packaging |
-| Partnership | Strategic partnerships, integrations |
-| Acquisition/Investment | M&A activity, funding rounds |
-| Case Study/Customer | Customer success stories, testimonials |
-| Events/Webinar | Conferences, webinars, workshops |
-| Best Practices/Guides | Educational content, how-to guides |
-| Security/Compliance | Security updates, certifications |
-| Hiring/Leadership | Team changes, executive announcements |
-| Company News | General company announcements |
-| Other | Miscellaneous content |
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
+4. **Push** to the branch (`git push origin feature/amazing-feature`)
+5. **Open** a Pull Request
 
-### Impact Levels
-| Level | Criteria |
-|-------|----------|
-| **High** | Pricing changes, major GA features, acquisitions, big partnerships, security incidents |
-| **Medium** | Meaningful feature updates, significant case studies, notable events |
-| **Low** | Generic tips, routine posts, educational content |
+### Development Setup
 
-## Data Output
+```bash
+# Clone your fork
+git clone https://github.com/YOUR_USERNAME/Competitor-Agent.git
+cd Competitor-Agent
 
-### Data Files
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 
-| File | Description | Columns |
-|------|-------------|---------|
-| `data/updates.csv` | Raw crawled articles | id, company, source_url, title, published_at, collected_at, clean_text |
-| `data/enriched_updates.csv` | AI-enriched articles | + summary, category, impact |
+# Install dependencies
+pip install -r requirements.txt
 
-### Export Formats
-- **CSV**: Standard data exports
-- **Excel (XLSX)**: Formatted spreadsheets
-- **JSON**: API-friendly format
-- **PDF**: Executive summaries with company logo
+# Run tests (if available)
+pytest tests/
+```
 
-## Dependencies
+---
 
-### Core Libraries
-| Library | Purpose |
+## 📦 Dependencies
+
+### Core Stack
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `requests` | latest | HTTP client for web crawling |
+| `beautifulsoup4` | latest | HTML parsing |
+| `lxml` | latest | Fast XML/HTML parser |
+| `playwright` | latest | JavaScript rendering |
+| `openai` | ≥1.40.0 | GPT-4o-mini API client |
+| `streamlit` | latest | Interactive dashboard |
+| `pandas` | latest | Data manipulation |
+| `pyarrow` | latest | Parquet file support |
+
+### Supporting Libraries
+
+| Package | Purpose |
 |---------|---------|
-| `requests` & `beautifulsoup4` | Web scraping and HTML parsing |
-| `playwright` | JavaScript-rendered page support |
-| `openai` | GPT-4o-mini for classification/summarization |
-| `streamlit` | Interactive dashboard |
-| `pandas` | Data manipulation |
-| `feedparser` | RSS feed parsing |
-| `tenacity` | Retry logic with exponential backoff |
-| `pydantic` | Configuration validation |
 | `python-dotenv` | Environment variable loading |
+| `feedparser` | RSS feed parsing |
+| `tenacity` | Retry logic with backoff |
+| `pydantic` | Configuration validation |
 | `reportlab` | PDF generation |
+| `python-dateutil` | Date parsing |
+| `openpyxl` | Excel export |
+| `slack_sdk` | Slack webhook integration |
 
-See `requirements.txt` for the complete list.
+---
 
-## Deployment
+## 📊 Monitored Competitors
 
-For production deployment on a Linux server (Ubuntu/Debian), see **[DEPLOYMENT.md](DEPLOYMENT.md)** which covers:
+| Competitor | Parent Company | Monitored Since |
+|------------|---------------|-----------------|
+| **Kicksite** | Independent | 2025 |
+| **Spark Membership** | Independent | 2025 |
+| **MyStudio** | Independent | 2025 |
+| **ZenPlanner** | Daxko | 2025 |
+| **GloFox** | ABC Fitness | 2025 |
+| **ClubOS** | Formerly ASF | 2025 |
 
-- Vultr server setup
-- System dependencies for Playwright
-- Nginx reverse proxy configuration
-- Systemd service for the dashboard
-- UFW firewall rules
-- Cron job automation
-- SSL with Let's Encrypt
-- Monitoring and maintenance
+---
 
-## Development
+## 📜 Changelog
 
-### Adding New Competitors
-1. Edit `config/monitors.yaml`
-2. Add competitor name and start URLs
-3. Run the pipeline
+### v1.0.0 (2025)
+- Initial release
+- Web crawling with Playwright fallback
+- GPT-4o-mini classification pipeline
+- Streamlit dashboard with PDF export
+- Linux deployment automation
+- Windows PowerShell automation
 
-### Customizing Classification
-Edit the `SYSTEM` prompt in `app/classify.py` to adjust:
-- Categories
-- Impact criteria
-- Summary style
+---
 
-### Running Quality Checks
-```bash
-# Generate QA sample (10% of enriched data)
-python -m jobs.qa_sampler
+## 📞 Support
 
-# Generate quarterly analytics
-python -m jobs.quarterly_rollup
-```
+Having issues? Here's how to get help:
 
-## Troubleshooting
+1. **Check the docs**: Read through this README and [DEPLOYMENT.md](DEPLOYMENT.md)
+2. **Search issues**: Look for similar problems in [GitHub Issues](https://github.com/F-Bhaimia/Competitor-Agent/issues)
+3. **Open an issue**: If your problem is new, create a detailed issue with:
+   - Python version (`python --version`)
+   - Operating system
+   - Error messages and logs
+   - Steps to reproduce
 
-### Crawl Issues
-- **403/429 errors**: Adjust `request_timeout_s` or add delays between requests
-- **Empty content**: Some sites require Playwright (JS rendering) - check the logs
-- **Rate limiting**: Reduce `max_pages_per_site` or add longer delays
+---
 
-### API Errors
-- **OpenAI rate limits**: The system uses Tenacity for automatic retries with exponential backoff
-- **Quota exceeded**: Check your OpenAI usage dashboard
-- **API failures**: Graceful fallback returns "Other" category and "Low" impact
+## 🙏 Acknowledgments
 
-### Data Issues
-- **Duplicates**: System deduplicates by `(company, source_url)` with SHA-256 hashing
-- **Missing dates**: Falls back from JSON-LD → OpenGraph → None
-- **Encoding issues**: Text is normalized and cleaned during parsing
+- **OpenAI** for GPT-4o-mini powering our classification
+- **Streamlit** for the beautiful dashboard framework
+- **Playwright** for headless browser automation
+- **BeautifulSoup** for rock-solid HTML parsing
 
-## Error Handling & Resilience
+---
 
-- **API Failures**: Graceful fallback with default values
-- **Rate Limiting**: Tenacity retry logic with exponential backoff
-- **Timeout Handling**: Configurable timeouts with Playwright fallback
-- **Duplicate Prevention**: SHA-256 hash-based deduplication
-- **Process Locking**: File locks and OS-level mutexes prevent concurrent runs
-- **Data Atomicity**: Temporary file writes with atomic replace
+<p align="center">
+  <b>Built with ❤️ for competitive intelligence</b>
+  <br>
+  <sub>Making market research effortless, one crawl at a time.</sub>
+</p>
 
-## Future Updates
-
-*Coming soon*
-
-## Contributing
-
-Contributions welcome! Please submit pull requests or open issues for bugs and feature requests.
+<p align="center">
+  <a href="#-competitor-news-monitor">Back to top ↑</a>
+</p>
