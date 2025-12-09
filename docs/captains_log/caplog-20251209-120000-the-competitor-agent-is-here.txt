@@ -1,0 +1,71 @@
+================================================================================
+CAPTAIN'S LOG: the-competitor-agent-is-here
+Date: 2025-12-09 12:00:00
+Previous Log: None - First Entry
+================================================================================
+
+## Summary
+Initial Captain's Log for the Competitor News Monitor project. This is an
+AI-powered competitive intelligence platform that automatically discovers,
+analyzes, and summarizes competitor activity for the membership and fitness
+management software industry.
+
+## Current State
+The project is in a stable, production-ready state with comprehensive
+documentation. The main branch is up-to-date with recent commits focused on
+deployment documentation and README cleanup. There are a few uncommitted local
+changes (modified README.md, Home.py) and generated pycache/data files.
+
+Key components in place:
+- Core crawling engine with Playwright fallback for JS-heavy sites
+- AI-powered classification using GPT-4o-mini (11 categories, 3-tier impact)
+- Streamlit dashboard with filtering, export, and PDF generation
+- Scheduled automation for Windows (PowerShell) and Linux (cron)
+- One-command deployment script for Linux servers
+
+## Work Completed
+- Project architecture established with modular design:
+  - `app/` - Core modules (crawl, parse, classify, summarize)
+  - `jobs/` - Batch processing (daily_scan, enrich_updates, etc.)
+  - `streamlit_app/` - Interactive dashboard
+  - `config/` - Competitor monitoring configuration
+- Full deployment documentation created (DEPLOYMENT.md)
+- Comprehensive README with architecture diagrams and API reference
+- Windows automation script (nightly_update.ps1)
+- Linux deployment script (deploy.sh)
+
+## Decisions Made
+- GPT-4o-mini chosen for classification (cost-effective, fast)
+- SHA-256 hashing for deduplication (company + normalized_url)
+- Breadth-first crawling with configurable depth limits
+- Parquet mirror for analytics performance
+- Streamlit for dashboard (rapid development, good for internal tools)
+
+## Issues Encountered
+- None documented in this initial log entry
+
+## Commits Made
+- 88af1fb: Add deployment documentation and script
+- e517a9c: Clear Future Updates section
+- 9a2fbe2: Remove Slack references and license, add Future Updates section
+- 0618c05: Remove contact information from README
+- 8947f15: Add comprehensive README documentation
+- bfafd47: Update README.md
+- fafc034: Update README.md
+- 8545382: Add comprehensive README documentation
+- 1bfeb83: Initial commit: Streamlit app, enrichment jobs, docs
+
+## Mistakes & Lessons
+None this session - this is the first log entry.
+
+## Next Steps
+- Review uncommitted changes to README.md and Home.py
+- Consider adding the generated pycache and data lock files to .gitignore
+- Set up the .claude configuration properly
+- Test the deployment workflow on a fresh server
+- Add monitoring/alerting for crawl failures
+- Consider adding tests for core modules
+
+================================================================================
+END OF LOG
+================================================================================

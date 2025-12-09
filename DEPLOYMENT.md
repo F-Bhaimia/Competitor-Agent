@@ -297,9 +297,30 @@ source .venv/bin/activate
 ```
 
 ### Update Code from GitHub
+
+**Recommended: Use the update script**
+```bash
+sudo /opt/competitor-agent/scripts/update.sh
+```
+
+This interactive script will:
+- Show current version info
+- Create a backup before updating
+- Pull latest code from git
+- Update Python dependencies if changed
+- Restart services automatically
+
+**Quick update (for automation/cron)**
+```bash
+sudo /opt/competitor-agent/scripts/update.sh quick
+```
+
+**Manual update (if needed)**
 ```bash
 cd /opt/competitor-agent
 git pull origin main
+source .venv/bin/activate
+pip install -r requirements.txt
 sudo systemctl restart competitor-dashboard
 ```
 
@@ -312,6 +333,79 @@ sudo systemctl status nginx
 ```bash
 sudo tail -f /var/log/nginx/error.log
 ```
+
+### System Health Check
+```bash
+sudo /opt/competitor-agent/scripts/status.sh
+```
+
+This will show a comprehensive status report including:
+- Current version and git status
+- Service status (dashboard, nginx)
+- Network ports and connectivity
+- Data file sizes and record counts
+- Recent crawl activity
+- System resources (disk, memory, load)
+- Health check results
+
+---
+
+## Updating the Application
+
+### Update Script Reference
+
+The `update.sh` script provides several commands for managing updates:
+
+| Command | Description |
+|---------|-------------|
+| `sudo ./scripts/update.sh` | Interactive update with prompts |
+| `sudo ./scripts/update.sh quick` | Quick update without prompts (for automation) |
+| `sudo ./scripts/update.sh status` | Show current version and service status |
+| `sudo ./scripts/update.sh rollback` | Rollback to a previous version |
+| `sudo ./scripts/update.sh deps` | Update dependencies only (no git pull) |
+| `sudo ./scripts/update.sh restart` | Restart services only |
+
+### Automated Updates (Optional)
+
+To automatically check for and apply updates weekly:
+
+```bash
+# Edit crontab
+sudo crontab -e
+
+# Add weekly update check (Sundays at 3 AM)
+0 3 * * 0 /opt/competitor-agent/scripts/update.sh quick >> /opt/competitor-agent/logs/update.log 2>&1
+```
+
+### Rollback Procedure
+
+If an update causes issues:
+
+```bash
+# Interactive rollback
+sudo /opt/competitor-agent/scripts/update.sh rollback
+
+# Or manual rollback
+cd /opt/competitor-agent
+git log --oneline -10  # Find the commit to rollback to
+git checkout <commit-hash>
+sudo systemctl restart competitor-dashboard
+```
+
+### Backups
+
+The update script automatically creates backups in `/opt/competitor-agent/backups/` before each update. To manually backup:
+
+```bash
+# Create backup of data directory
+cd /opt/competitor-agent
+tar -czf backups/manual-backup-$(date +%Y%m%d).tar.gz data config .env
+
+# Download backup to local machine
+scp root@your-server-ip:/opt/competitor-agent/backups/*.tar.gz ./
+```
+
+---
 
 ## Troubleshooting
 

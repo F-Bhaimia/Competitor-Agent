@@ -187,9 +187,10 @@ ufw --force enable
 print_success "Firewall configured"
 echo ""
 
-# Step 11: Set up cron job
+# Step 11: Set up cron job and make scripts executable
 print_info "Step 10/10: Setting up automated crawls..."
 chmod +x $APP_DIR/scripts/*.sh
+chmod +x $APP_DIR/deploy.sh 2>/dev/null || true
 
 # Create cron job
 CRON_JOB="0 2 * * * $APP_DIR/scripts/update_daily.sh >> $APP_DIR/logs/cron.log 2>&1"
@@ -247,9 +248,19 @@ echo "=========================================="
 echo "         USEFUL COMMANDS"
 echo "=========================================="
 echo ""
-echo "Restart dashboard:    systemctl restart competitor-dashboard"
+echo "Check status:         $APP_DIR/scripts/status.sh"
+echo "Update application:   sudo $APP_DIR/scripts/update.sh"
+echo "Restart dashboard:    sudo systemctl restart competitor-dashboard"
 echo "View logs:            journalctl -u competitor-dashboard -f"
 echo "Run manual crawl:     cd $APP_DIR && source .venv/bin/activate && ./scripts/run_pipeline.sh"
-echo "Update code:          cd $APP_DIR && git pull origin main && systemctl restart competitor-dashboard"
+echo ""
+echo "=========================================="
+echo "         SCRIPTS REFERENCE"
+echo "=========================================="
+echo ""
+echo "scripts/update.sh       - Update code, deps, and restart services"
+echo "scripts/status.sh       - Health check and status report"
+echo "scripts/update_daily.sh - Daily data crawl (runs via cron)"
+echo "scripts/run_pipeline.sh - Manual pipeline execution"
 echo ""
 print_success "Deployment completed successfully!"
