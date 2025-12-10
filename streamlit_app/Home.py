@@ -1186,6 +1186,18 @@ if menu == "Posts by Competitor":
             chart_end_utc = pd.Timestamp(chart_end).tz_localize("UTC") + pd.Timedelta(days=1)
             fq = fq[(fq["date_ref"] >= chart_start_utc) & (fq["date_ref"] < chart_end_utc)]
 
+            # Generate all quarters in the selected date range
+            all_quarters = pd.period_range(
+                start=pd.Timestamp(chart_start).to_period("Q"),
+                end=pd.Timestamp(chart_end).to_period("Q"),
+                freq="Q"
+            ).astype(str).tolist()
+        else:
+            all_quarters = []
+
+        # Get all companies from the full dataset for consistent colors
+        all_companies = sorted(fq_all["company"].unique().tolist())
+
         if not fq.empty:
             try:
                 fq["date_ref_naive"] = fq["date_ref"].dt.tz_convert("UTC").dt.tz_localize(None)
@@ -1194,13 +1206,24 @@ if menu == "Posts by Competitor":
 
             fq["quarter"] = fq["date_ref_naive"].dt.to_period("Q").astype(str)
             g = fq.groupby(["quarter", "company"]).size().reset_index(name="posts")
+
+            # Create complete grid of all quarters x all companies with zeros
+            if all_quarters and all_companies:
+                full_index = pd.MultiIndex.from_product([all_quarters, all_companies], names=["quarter", "company"])
+                full_df = pd.DataFrame(index=full_index).reset_index()
+                full_df["posts"] = 0
+                # Merge actual data
+                g = full_df.merge(g, on=["quarter", "company"], how="left", suffixes=("_default", ""))
+                g["posts"] = g["posts"].fillna(g["posts_default"]).fillna(0).astype(int)
+                g = g[["quarter", "company", "posts"]]
+
             g["_qsort"] = pd.PeriodIndex(g["quarter"], freq="Q")
             g = g.sort_values(["_qsort", "company"]).drop(columns=["_qsort"])
 
             try:
                 import altair as alt
                 chart = alt.Chart(g, height=280).mark_bar().encode(
-                    x=alt.X("quarter:N", title="Quarter", sort=list(g["quarter"].unique())),
+                    x=alt.X("quarter:N", title="Quarter", sort=all_quarters if all_quarters else list(g["quarter"].unique())),
                     y=alt.Y("posts:Q", title="Posts"),
                     color=alt.Color("company:N", title="Company"),
                     tooltip=["quarter", "company", "posts"],
@@ -1209,6 +1232,9 @@ if menu == "Posts by Competitor":
             except Exception:
                 piv = g.pivot_table(index="quarter", columns="company", values="posts", fill_value=0)
                 st.bar_chart(piv)
+        elif all_quarters:
+            # No data but show empty quarters
+            st.info(f"No articles found in the selected date range ({all_quarters[0]} to {all_quarters[-1]}).")
         else:
             st.info("No rows in the selected date range.")
     else:
@@ -1217,7 +1243,6 @@ if menu == "Posts by Competitor":
     # Feed table
     st.divider()
     st.subheader("Feed")
-    st.write("Click a title to open the source; hover over summary to see full text.")
     st.caption(f"Showing {len(f)} articles")
 
     show_cols = [c for c in ["date_ref", "company", "title", "category", "impact", "source_url", "summary"] if c in f.columns]
