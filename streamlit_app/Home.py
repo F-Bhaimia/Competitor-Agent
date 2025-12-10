@@ -680,23 +680,76 @@ SECTION_LABELS = [
     "Config",               # Configuration settings
 ]
 
-# Track previous menu selection
+# Custom CSS for tab styling
+st.markdown("""
+<style>
+/* Tab container */
+div[data-testid="stHorizontalBlock"].tab-container {
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 0;
+    margin-bottom: 1rem;
+}
+
+/* Base tab button style */
+div[data-testid="stHorizontalBlock"].tab-container button[kind="secondary"] {
+    border: 2px solid #ff4b4b;
+    background-color: transparent;
+    color: #ff4b4b;
+    border-radius: 8px 8px 0 0;
+    border-bottom: none;
+    margin-right: 4px;
+    font-weight: 500;
+}
+
+/* Active tab style */
+div[data-testid="stHorizontalBlock"].tab-container button[kind="primary"] {
+    background-color: #ff4b4b;
+    color: white;
+    border: 2px solid #ff4b4b;
+    border-radius: 8px 8px 0 0;
+    border-bottom: none;
+    margin-right: 4px;
+    font-weight: 600;
+}
+
+/* Hover effect for inactive tabs */
+div[data-testid="stHorizontalBlock"].tab-container button[kind="secondary"]:hover {
+    background-color: #ffeeee;
+    border-color: #ff4b4b;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Initialize active tab in session state
+if "active_tab" not in st.session_state:
+    st.session_state.active_tab = SECTION_LABELS[0]
+
+# Track previous menu selection for logging
 if "prev_menu" not in st.session_state:
     st.session_state.prev_menu = None
 
-menu = st.radio(
-    "Navigation",
-    SECTION_LABELS,
-    horizontal=True,
-    key="top_menu_radio",
-)
+# Create tab buttons
+tab_cols = st.columns(len(SECTION_LABELS))
+for i, label in enumerate(SECTION_LABELS):
+    with tab_cols[i]:
+        is_active = st.session_state.active_tab == label
+        if st.button(
+            label,
+            key=f"tab_{i}",
+            type="primary" if is_active else "secondary",
+            use_container_width=True
+        ):
+            if st.session_state.active_tab != label:
+                # Log navigation change
+                if st.session_state.prev_menu is not None:
+                    log_user_action(get_client_ip(), "navigation", f"Navigated to: {label}")
+                    logger.debug(f"Navigation: {st.session_state.prev_menu} -> {label}")
+                st.session_state.prev_menu = label
+                st.session_state.active_tab = label
+                st.rerun()
 
-# Log navigation changes
-if st.session_state.prev_menu != menu:
-    if st.session_state.prev_menu is not None:  # Don't log initial load
-        log_user_action(get_client_ip(), "navigation", f"Navigated to: {menu}")
-        logger.debug(f"Navigation: {st.session_state.prev_menu} -> {menu}")
-    st.session_state.prev_menu = menu
+menu = st.session_state.active_tab
+st.session_state.prev_menu = menu
 
 # --------------------------- Section: Posts by Competitor ---------------------------
 if menu == "Posts by Competitor":
