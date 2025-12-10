@@ -1,0 +1,116 @@
+================================================================================
+CAPTAIN'S LOG: added-some-cool-features-and-email-ingestion
+Date: 2025-12-09 20:28:00
+Previous Log: caplog-20251209-120000-the-competitor-agent-is-here.txt
+================================================================================
+
+## Summary
+Major feature additions focused on newsletter email ingestion via CloudMailin
+webhook and significant UI/UX improvements to the Streamlit dashboard. The
+system can now receive competitor newsletters via email and process them
+through the same analysis pipeline as crawled articles.
+
+## Current State
+The project now has a complete email ingestion pipeline:
+- FastAPI webhook server receives emails from CloudMailin
+- Emails are saved as JSON and processed into updates.csv
+- AI enrichment classifies newsletters alongside crawled content
+- Dashboard displays all content uniformly
+
+Dashboard improvements include:
+- Styled tab navigation (replaced radio buttons)
+- Dedicated settings page with gear icon access
+- Scrollable feed with proper table formatting
+- Auto-save on competitor additions
+- Chart improvements with date pickers and all-quarter display
+
+## Work Completed
+- **Email Ingestion System:**
+  - `app/webhook_server.py` - FastAPI server for CloudMailin webhooks
+  - `jobs/process_emails.py` - Converts emails to updates.csv format
+  - Competitor matching by sender domain/keywords
+  - Raw email archiving in `data/emails/processed/`
+
+- **Logging Enhancements:**
+  - Added email-specific logging functions to `app/logger.py`
+  - `log_webhook_startup()`, `log_email_received()`, `log_email_error()`
+  - `log_email_processing_start/complete()`, `log_email_processed/skipped()`
+
+- **Startup Scripts:**
+  - `start_dashboard.bat/sh` - Unified launcher for dashboard + webhook
+  - `stop_dashboard.bat/sh` - Clean shutdown scripts
+  - `start_webhook.bat` - Standalone webhook launcher
+  - Fixed process killing using netstat for reliable port detection
+
+- **Dashboard UI:**
+  - Replaced radio navigation with styled tab buttons
+  - Created settings page (gear icon) for Config and Data Quality Tools
+  - Made Feed scrollable with native st.dataframe
+  - Auto-save competitors to YAML on add
+  - Chart shows all quarters in range (including empty ones)
+  - Date picker defaults to YTD
+
+- **Deployment Updates:**
+  - Added webhook systemd service configuration
+  - Updated nginx config for /email endpoint proxy
+  - Added hourly cron for email processing
+
+## Decisions Made
+- **Separate webhook port (8001):** Streamlit doesn't support custom endpoints,
+  so webhook runs as separate FastAPI service
+- **JSON-Normalized format:** CloudMailin sends structured JSON for easy parsing
+- **netstat for process detection:** More reliable than wmic on Windows
+- **Email archiving:** Keep processed emails in `processed/` subfolder for
+  debugging and potential reprocessing
+
+## Issues Encountered
+- **Variable shadowing bug:** Used `f` for both DataFrame and file handles,
+  causing AttributeError. Fixed by renaming file handle to `cfg_file`
+- **Custom HTML table failed:** Streamlit blocks JavaScript in st.markdown.
+  Switched to native st.dataframe component
+- **Trailing slash issue:** CloudMailin URL had trailing slash, added
+  `redirect_slashes=True` to FastAPI app
+- **Port conflict on restart:** Previous processes blocked ports. Fixed with
+  netstat-based process killing in startup scripts
+- **FastAPI not installed:** Added to requirements.txt, user needed pip install
+- **ngrok URL confusion:** User had `:8001` in CloudMailin URL, but ngrok
+  handles port forwarding internally
+
+## Commits Made
+- 10362e4: Fix startup scripts to reliably kill existing processes
+- 1a17d5a: Add detailed logging for email webhook and processing
+- 0fd9cc0: Unify startup scripts for dashboard and webhook
+- 34a1044: Add email processing job for newsletter ingestion
+- e736b77: Handle trailing slash in webhook endpoint
+- 154fd79: Add CloudMailin webhook server for newsletter ingestion
+- a4f255e: Fix chart to show all quarters in range, remove Feed instructions
+- f281ee7: Auto-save when adding competitor in config
+- 4bca9cc: Fix Feed table - use native st.dataframe
+- 08e0dd7: Improve Feed table UX with sticky header and copy button
+- 9969b63: Add scrollable Feed container and restore YAML viewer
+- 41c5c69: Move Config and Data Quality Tools to settings page
+- a5d04d5: Replace radio navigation with styled tab buttons
+- 88c7e39: Update Posts per Quarter chart with date picker
+- 9b82cbe: Fix Config section variable shadowing and input clearing
+
+## Mistakes & Lessons
+- **Always check variable names in nested scopes:** The `f` shadowing bug was
+  subtle - worked fine until the DataFrame was needed after file operations
+- **Streamlit has strict security:** Can't inject JavaScript via markdown,
+  need to use native components for interactive features
+- **Test with actual external services:** The ngrok/CloudMailin integration
+  revealed URL format issues that wouldn't appear in local testing
+- **Kill processes by port, not name:** Process name matching is unreliable
+  on Windows; netstat + PID is more robust
+
+## Next Steps
+- Test full email-to-dashboard flow with real newsletter
+- Run `python -m jobs.process_emails` to process received test email
+- Run `python -m jobs.enrich_updates` to classify with AI
+- Consider Windows scheduled task for hourly email processing
+- Push commits to remote (5 commits ahead of origin/main)
+- Deploy updated code to production server
+
+================================================================================
+END OF LOG
+================================================================================
