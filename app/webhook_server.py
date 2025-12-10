@@ -21,7 +21,13 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 import uvicorn
 
-from app.logger import get_system_logger, log_user_action
+from app.logger import (
+    get_system_logger,
+    log_user_action,
+    log_webhook_startup,
+    log_email_received,
+    log_email_error,
+)
 
 logger = get_system_logger("webhook")
 
@@ -125,11 +131,14 @@ async def receive_email(request: Request):
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
 
-        # Log the receipt
+        # Get file size for logging
+        file_size = filepath.stat().st_size
+
+        # Log the receipt with detailed info
         subject = headers.get("subject") or headers.get("Subject", "(no subject)")
         from_addr = payload.get("envelope", {}).get("from", "unknown")
 
-        logger.info(f"Received email: '{subject}' from {from_addr}")
+        log_email_received(from_addr, subject, filename, file_size)
         logger.debug(f"Saved to: {filepath}")
         log_user_action("webhook", "email_received", f"From: {from_addr}, Subject: {subject}")
 
@@ -143,10 +152,11 @@ async def receive_email(request: Request):
         )
 
     except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON payload: {e}")
+        log_email_error("Invalid JSON payload", details=str(e))
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
     except Exception as e:
+        log_email_error("Webhook processing failed", details=str(e))
         logger.exception(f"Error processing email webhook: {e}")
         raise HTTPException(status_code=500, detail=f"Internal error: {e}")
 
@@ -184,7 +194,9 @@ def main():
     host = global_cfg.get("webhook_host", "0.0.0.0")
     port = int(global_cfg.get("webhook_port", 8001))
 
-    logger.info(f"Starting webhook server on {host}:{port}")
+    # Log startup with standard format
+    log_webhook_startup(host, port)
+
     print(f"\n{'='*60}")
     print(f"  Competitor Agent Webhook Server")
     print(f"  Listening on: http://{host}:{port}")

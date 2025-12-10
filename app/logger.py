@@ -309,6 +309,69 @@ def log_user_action(ip: str, action: str, details: str = ""):
 
 
 # =============================================================================
+# EMAIL/WEBHOOK LOGGING FUNCTIONS
+# =============================================================================
+
+def log_webhook_startup(host: str, port: int):
+    """Log webhook server startup."""
+    logger = get_system_logger("webhook")
+    logger.info("=" * 60)
+    logger.info(f"WEBHOOK SERVER STARTED")
+    logger.info(f"Listening on: http://{host}:{port}")
+    logger.info(f"Endpoint: POST /email")
+    logger.info(f"PID: {os.getpid()}")
+    logger.info("=" * 60)
+
+
+def log_email_received(from_addr: str, subject: str, filename: str, size_bytes: int = None):
+    """Log receipt of an email via webhook."""
+    logger = get_system_logger("webhook")
+    msg = f"EMAIL RECEIVED: From='{from_addr}' Subject='{subject[:60]}'"
+    if size_bytes:
+        msg += f" Size={size_bytes} bytes"
+    msg += f" File='{filename}'"
+    logger.info(msg)
+
+
+def log_email_error(error: str, from_addr: str = None, details: str = None):
+    """Log an error during email processing."""
+    logger = get_system_logger("webhook")
+    msg = f"EMAIL ERROR: {error}"
+    if from_addr:
+        msg += f" From='{from_addr}'"
+    if details:
+        msg += f" Details: {details}"
+    logger.error(msg)
+
+
+def log_email_processing_start(file_count: int):
+    """Log start of email processing job."""
+    logger = get_system_logger("process_emails")
+    logger.info("=" * 60)
+    logger.info(f"EMAIL PROCESSING STARTED: {file_count} files to process")
+    logger.info("=" * 60)
+
+
+def log_email_processed(filename: str, company: str, subject: str):
+    """Log successful processing of an email."""
+    logger = get_system_logger("process_emails")
+    logger.info(f"PROCESSED: [{company}] '{subject[:50]}' from {filename}")
+
+
+def log_email_skipped(filename: str, reason: str):
+    """Log when an email is skipped."""
+    logger = get_system_logger("process_emails")
+    logger.debug(f"SKIPPED: {filename} - {reason}")
+
+
+def log_email_processing_complete(files_processed: int, articles_added: int, duration_seconds: float):
+    """Log completion of email processing job."""
+    logger = get_system_logger("process_emails")
+    logger.info(f"EMAIL PROCESSING COMPLETE: {files_processed} files processed, "
+                f"{articles_added} articles added in {duration_seconds:.1f}s")
+
+
+# =============================================================================
 # IP EXTRACTION HELPERS (for Streamlit)
 # =============================================================================
 

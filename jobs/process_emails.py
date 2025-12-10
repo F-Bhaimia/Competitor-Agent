@@ -25,7 +25,16 @@ from html.parser import HTMLParser
 import yaml
 import pandas as pd
 
-from app.logger import get_system_logger, log_user_action
+import time
+
+from app.logger import (
+    get_system_logger,
+    log_user_action,
+    log_email_processing_start,
+    log_email_processed,
+    log_email_skipped,
+    log_email_processing_complete,
+)
 
 logger = get_system_logger("process_emails")
 
@@ -267,7 +276,7 @@ def process_email_file(filepath: Path, config: Dict, existing_ids: set) -> Optio
 
 def main():
     """Process all unprocessed email files."""
-    logger.info("Starting email processing job")
+    start_time = time.time()
 
     # Ensure directories exist
     EMAILS_DIR.mkdir(parents=True, exist_ok=True)
@@ -286,10 +295,12 @@ def main():
         print("No email files to process.")
         return
 
-    logger.info(f"Found {len(email_files)} email files to process")
+    # Log start with standard format
+    log_email_processing_start(len(email_files))
 
     new_rows = []
     processed_files = []
+    skipped_count = 0
 
     for filepath in email_files:
         result = process_email_file(filepath, config, existing_ids)
@@ -300,10 +311,12 @@ def main():
             processed_files.append((filepath, filename))
             existing_ids.add(result["id"])  # Prevent duplicates within run
 
-            logger.info(f"Processed: {result['title'][:50]}... -> {result['company']}")
+            log_email_processed(filename, result['company'], result['title'])
         else:
             # Move unmatched/duplicate to processed anyway
             processed_files.append((filepath, filepath.name))
+            log_email_skipped(filepath.name, "duplicate or parse error")
+            skipped_count += 1
 
     # Append new rows to CSV
     if new_rows:
@@ -331,10 +344,16 @@ def main():
         except Exception as e:
             logger.warning(f"Failed to move {filename}: {e}")
 
+    # Calculate duration and log completion
+    duration = time.time() - start_time
+    log_email_processing_complete(len(processed_files), len(new_rows), duration)
+
     # Summary
     print(f"\nEmail Processing Complete")
     print(f"  Files processed: {len(processed_files)}")
     print(f"  New articles added: {len(new_rows)}")
+    print(f"  Skipped: {skipped_count}")
+    print(f"  Duration: {duration:.1f}s")
 
     if new_rows:
         print("\nNewly added articles:")
