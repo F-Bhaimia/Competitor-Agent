@@ -6,6 +6,9 @@ global:
   follow_within_domain_only: true
   dedupe_window_days: 365
   slack_webhook_env: SLACK_WEBHOOK_URL
+  # Webhook settings for newsletter ingestion
+  webhook_port: 8001
+  webhook_host: '0.0.0.0'
   high_impact_labels:
   - Pricing
   - M&A
@@ -35,3 +38,9 @@ competitors:
 - name: ClubOS (Formerly ASF)
   start_urls:
   - https://www.club-os.com/blog
+- name: BJJ Link
+  start_urls:
+  - https://bjjlink.com/features
+- name: Member Solutions
+  start_urls:
+  - https://membersolutions.com/blog/

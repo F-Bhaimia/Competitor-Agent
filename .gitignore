@@ -52,6 +52,7 @@ data/*.csv
 data/*.parquet
 data/.scan_in_progress.lock
 data/.update_daily.lock
+data/emails/*.json
 
 # Exports (generated files)
 exports/

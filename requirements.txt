@@ -15,3 +15,6 @@ lxml
 openai>=1.40.0
 python-dotenv>=1.0.1
 feedparser>=6.0.11
+# Webhook server for newsletter ingestion
+fastapi>=0.104.0
+uvicorn>=0.24.0

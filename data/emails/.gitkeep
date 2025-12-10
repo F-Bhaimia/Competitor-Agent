@@ -1,0 +1,2 @@
+# This directory stores incoming newsletter emails from CloudMailin webhook
+# JSON files in this directory are ignored by git (contain email content)
