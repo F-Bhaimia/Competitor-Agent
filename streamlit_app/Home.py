@@ -715,41 +715,68 @@ if menu == "Posts by Competitor":
     st.divider()
     st.subheader("Posts per Quarter by Competitor")
 
-    fq = f.copy()
-    fq = fq[fq["date_ref"].notna()].copy()
-    if not fq.empty:
-        try:
-            fq["date_ref_naive"] = fq["date_ref"].dt.tz_convert("UTC").dt.tz_localize(None)
-        except Exception:
-            fq["date_ref_naive"] = fq["date_ref"].dt.tz_localize(None)
+    # Determine available date range from data
+    fq_all = f[f["date_ref"].notna()].copy()
+    if not fq_all.empty:
+        chart_min_date = fq_all["date_ref"].min()
+        chart_max_date = fq_all["date_ref"].max()
 
-        fq["quarter"] = fq["date_ref_naive"].dt.to_period("Q").astype(str)
-        g = fq.groupby(["quarter", "company"]).size().reset_index(name="posts")
-        g["_qsort"] = pd.PeriodIndex(g["quarter"], freq="Q")
-        g = g.sort_values(["_qsort", "company"]).drop(columns=["_qsort"])
+        # Default to current year to date
+        current_year_start = pd.Timestamp(f"{pd.Timestamp.now().year}-01-01", tz="UTC")
+        default_start = max(chart_min_date, current_year_start)
+        default_end = chart_max_date
 
-        try:
-            import altair as alt
-            base = alt.Chart(g, height=280)
-            view_mode = st.radio("View", ("Grouped", "Stacked"), horizontal=True, key="view_mode_chart")
-            if view_mode == "Grouped":
-                chart = base.mark_bar().encode(
-                    x=alt.X("company:N", title="Company"),
-                    y=alt.Y("posts:Q", title="Posts"),
-                    color=alt.Color("company:N", title="Company"),
-                    column=alt.Column("quarter:N", title="Quarter", header=alt.Header(labelAngle=0)),
-                )
-            else:
-                chart = base.mark_bar().encode(
+        # Date picker for chart range
+        chart_date_col1, chart_date_col2 = st.columns(2)
+        with chart_date_col1:
+            chart_start = st.date_input(
+                "From",
+                value=default_start.date() if pd.notna(default_start) else None,
+                min_value=chart_min_date.date() if pd.notna(chart_min_date) else None,
+                max_value=chart_max_date.date() if pd.notna(chart_max_date) else None,
+                key="chart_date_from"
+            )
+        with chart_date_col2:
+            chart_end = st.date_input(
+                "To",
+                value=default_end.date() if pd.notna(default_end) else None,
+                min_value=chart_min_date.date() if pd.notna(chart_min_date) else None,
+                max_value=chart_max_date.date() if pd.notna(chart_max_date) else None,
+                key="chart_date_to"
+            )
+
+        # Filter data by selected chart date range
+        fq = fq_all.copy()
+        if chart_start and chart_end:
+            chart_start_utc = pd.Timestamp(chart_start).tz_localize("UTC")
+            chart_end_utc = pd.Timestamp(chart_end).tz_localize("UTC") + pd.Timedelta(days=1)
+            fq = fq[(fq["date_ref"] >= chart_start_utc) & (fq["date_ref"] < chart_end_utc)]
+
+        if not fq.empty:
+            try:
+                fq["date_ref_naive"] = fq["date_ref"].dt.tz_convert("UTC").dt.tz_localize(None)
+            except Exception:
+                fq["date_ref_naive"] = fq["date_ref"].dt.tz_localize(None)
+
+            fq["quarter"] = fq["date_ref_naive"].dt.to_period("Q").astype(str)
+            g = fq.groupby(["quarter", "company"]).size().reset_index(name="posts")
+            g["_qsort"] = pd.PeriodIndex(g["quarter"], freq="Q")
+            g = g.sort_values(["_qsort", "company"]).drop(columns=["_qsort"])
+
+            try:
+                import altair as alt
+                chart = alt.Chart(g, height=280).mark_bar().encode(
                     x=alt.X("quarter:N", title="Quarter", sort=list(g["quarter"].unique())),
                     y=alt.Y("posts:Q", title="Posts"),
                     color=alt.Color("company:N", title="Company"),
                     tooltip=["quarter", "company", "posts"],
                 )
-            st.altair_chart(chart, use_container_width=True)
-        except Exception:
-            piv = g.pivot_table(index="quarter", columns="company", values="posts", fill_value=0)
-            st.bar_chart(piv)
+                st.altair_chart(chart, use_container_width=True)
+            except Exception:
+                piv = g.pivot_table(index="quarter", columns="company", values="posts", fill_value=0)
+                st.bar_chart(piv)
+        else:
+            st.info("No rows in the selected date range.")
     else:
         st.info("No rows with a valid date in the current filter selection.")
 
@@ -1136,7 +1163,10 @@ elif menu == "Config":
         # Competitors Management
         with st.expander("Competitors", expanded=True):
             st.markdown("**Monitored Competitors**")
-            st.caption(f"Currently monitoring {len(st.session_state.config_competitors)} competitors")
+            st.caption(f"Currently monitoring {len(st.session_state.config_competitors)} competitors (in session state)")
+
+            # Debug: show raw session state
+            st.caption(f"🐛 Session state keys: {[c.get('name') for c in st.session_state.config_competitors]}")
 
             # Build list of competitors from session state with editable fields
             updated_competitors = []
@@ -1174,6 +1204,7 @@ elif menu == "Config":
                     st.divider()
 
             # Update session state with edited values
+            st.caption(f"🐛 Updated competitors from form: {[c.get('name') for c in updated_competitors]}")
             st.session_state.config_competitors = updated_competitors
 
             # Add new competitor section
@@ -1239,11 +1270,20 @@ elif menu == "Config":
 
         # Save Configuration
         st.divider()
+
+        # Debug: show what will be saved
+        with st.expander("🐛 Debug: Data to be saved", expanded=False):
+            st.write(f"Competitors in session state: {len(st.session_state.config_competitors)}")
+            for i, c in enumerate(st.session_state.config_competitors):
+                st.write(f"  {i+1}. {c.get('name', 'NO NAME')} - {len(c.get('start_urls', []))} URLs")
+
         col_save, col_reset = st.columns([1, 1])
 
         with col_save:
             if st.button("💾 Save Configuration", type="primary", key="btn_save_config"):
                 try:
+                    st.info(f"Attempting to save {len(st.session_state.config_competitors)} competitors...")
+
                     # Build updated config from current form values
                     updated_config = {
                         "global": {
@@ -1262,14 +1302,19 @@ elif menu == "Config":
 
                     # Write to file with atomic replace
                     tmp_path = CONFIG_PATH + ".tmp"
+                    st.info(f"Writing to temp file: {tmp_path}")
+                    st.write("Config to save:", updated_config)
+
                     with open(tmp_path, "w", encoding="utf-8") as cfg_file:
                         yaml.dump(updated_config, cfg_file, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+                    st.info(f"Replacing {CONFIG_PATH} with temp file...")
                     os.replace(tmp_path, CONFIG_PATH)
 
                     log_user_action(get_client_ip(), "config_save", f"Saved config: {len(st.session_state.config_competitors)} competitors")
                     logger.info(f"Configuration saved: log_level={new_log_level}, max_pages={new_max_pages}, competitors={len(st.session_state.config_competitors)}")
 
-                    st.success(f"Configuration saved to {CONFIG_PATH}!")
+                    st.success(f"✅ Configuration saved to {CONFIG_PATH}!")
 
                     # Reload log level dynamically
                     from app.logger import set_log_level
