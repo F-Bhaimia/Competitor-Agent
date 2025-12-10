@@ -846,15 +846,34 @@ if st.session_state.show_settings:
                 if new_comp_name.strip() and new_comp_urls.strip():
                     new_urls_list = [u.strip() for u in new_comp_urls.strip().split("\n") if u.strip()]
                     if new_urls_list:
+                        # Add to session state
                         st.session_state.config_competitors.append({
                             "name": new_comp_name.strip(),
                             "start_urls": new_urls_list
                         })
+
+                        # Auto-save to YAML file immediately
+                        try:
+                            updated_config = {
+                                "global": config.get("global", {}),
+                                "competitors": st.session_state.config_competitors
+                            }
+                            tmp_path = CONFIG_PATH + ".tmp"
+                            with open(tmp_path, "w", encoding="utf-8") as cfg_file:
+                                yaml.dump(updated_config, cfg_file, default_flow_style=False, allow_unicode=True, sort_keys=False)
+                            os.replace(tmp_path, CONFIG_PATH)
+                            log_user_action(get_client_ip(), "config_add_competitor", f"Added competitor: {new_comp_name.strip()}")
+                            logger.info(f"Added competitor '{new_comp_name.strip()}' and saved to {CONFIG_PATH}")
+                            st.success(f"Added '{new_comp_name.strip()}' and saved to config!")
+                        except Exception as e:
+                            st.error(f"Added to list but failed to save: {e}")
+                            logger.error(f"Failed to save config after adding competitor: {e}")
+
+                        # Clear input fields
                         if "settings_new_comp_name" in st.session_state:
                             del st.session_state["settings_new_comp_name"]
                         if "settings_new_comp_urls" in st.session_state:
                             del st.session_state["settings_new_comp_urls"]
-                        st.success(f"Added '{new_comp_name}' - click Save to persist")
                         st.rerun()
                 else:
                     st.warning("Please enter both a name and at least one URL.")
