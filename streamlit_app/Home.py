@@ -923,6 +923,16 @@ if st.session_state.show_settings:
                         del st.session_state.config_competitors
                     st.rerun()
 
+            # View Raw YAML
+            st.divider()
+            with st.expander("📄 View Raw YAML", expanded=False):
+                try:
+                    with open(CONFIG_PATH, "r", encoding="utf-8") as cfg_file:
+                        current_yaml = cfg_file.read()
+                    st.code(current_yaml, language="yaml")
+                except Exception as e:
+                    st.error(f"Could not read config file: {e}")
+
     # ===================== DATA QUALITY TOOLS TAB =====================
     with settings_tab2:
         st.subheader("Enrichment")
@@ -1189,6 +1199,7 @@ if menu == "Posts by Competitor":
     st.divider()
     st.subheader("Feed")
     st.write("Click a title to open the source; summaries appear if enrichment is complete.")
+    st.caption(f"Showing {len(f)} articles")
 
     show_cols = [c for c in ["date_ref", "company", "title", "category", "impact", "source_url", "summary"] if c in f.columns]
     sorted_f = f.sort_values(by=["date_ref"], ascending=False)
@@ -1218,10 +1229,13 @@ if menu == "Posts by Competitor":
     if "impact" in display.columns:
         display["impact"] = display["impact"].apply(impact_badge)
 
+    # Scrollable feed container (max height 500px)
+    feed_html = display.to_html(escape=False, index=False) \
+        .replace('<table', '<table style="word-wrap:break-word;white-space:normal;table-layout:fixed;width:100%;"') \
+        .replace('<td', '<td style="word-wrap:break-word;white-space:normal;"')
+
     st.markdown(
-        display.to_html(escape=False, index=False)
-        .replace('<table', '<table style="word-wrap:break-word;white-space:normal;table-layout:fixed;width:100%;"')
-        .replace('<td', '<td style="word-wrap:break-word;white-space:normal;"'),
+        f'<div style="max-height:500px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:8px;padding:8px;">{feed_html}</div>',
         unsafe_allow_html=True,
     )
 
