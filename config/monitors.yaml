@@ -8,6 +8,8 @@ global:
   slack_webhook_env: SLACK_WEBHOOK_URL
   # Webhook settings for newsletter ingestion
   webhook_port: 8001
+  # dev email cloudmailin ee1e4d9fcf023ad684bc@cloudmailin.net
+  # dev domain ngrok https://dervishlike-rosalia-rostrally.ngrok-free.dev 
   webhook_host: '0.0.0.0'
   high_impact_labels:
   - Pricing

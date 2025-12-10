@@ -32,7 +32,8 @@ EMAILS_DIR = Path("data/emails")
 app = FastAPI(
     title="Competitor Agent Webhook",
     description="Receives newsletter emails from CloudMailin",
-    version="1.0.0"
+    version="1.0.0",
+    redirect_slashes=True,  # Handle /email and /email/ the same way
 )
 
 
