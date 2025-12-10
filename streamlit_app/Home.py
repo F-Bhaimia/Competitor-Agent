@@ -1274,12 +1274,51 @@ if st.session_state.show_settings:
             # Recent emails table
             st.subheader("Recent Emails")
             if not emails_df.empty:
+                from urllib.parse import quote
+
                 recent = emails_df.sort_values("received_at", ascending=False).head(20)
                 display_cols = ["json_file", "from_address", "subject", "matched_company", "injected", "received_at"]
                 display_cols = [c for c in display_cols if c in recent.columns]
                 recent_display = recent[display_cols].copy()
-                recent_display.columns = ["File", "From", "Subject", "Matched Company", "Injected", "Received"]
-                st.dataframe(recent_display, use_container_width=True, hide_index=True)
+
+                # Create clickable link to email viewer from json_file
+                if "json_file" in recent_display.columns:
+                    config_path = Path("config/monitors.yaml")
+                    webhook_port = 8001
+                    if config_path.exists():
+                        try:
+                            with open(config_path, "r", encoding="utf-8") as cfg_file:
+                                cfg = yaml.safe_load(cfg_file) or {}
+                                webhook_port = cfg.get("global", {}).get("webhook_port", 8001)
+                        except Exception:
+                            pass
+
+                    def make_email_view_url(json_file):
+                        if not json_file or pd.isna(json_file):
+                            return ""
+                        # Strip .json extension to get email_id
+                        email_id = str(json_file).replace(".json", "")
+                        email_id_encoded = quote(email_id, safe="")
+                        return f"http://localhost:{webhook_port}/email/view/{email_id_encoded}"
+
+                    recent_display["view_url"] = recent_display["json_file"].apply(make_email_view_url)
+                    # Reorder to put view_url first, drop json_file
+                    recent_display = recent_display.drop(columns=["json_file"])
+                    cols_order = ["view_url"] + [c for c in recent_display.columns if c != "view_url"]
+                    recent_display = recent_display[cols_order]
+                    recent_display.columns = ["View", "From", "Subject", "Matched Company", "Injected", "Received"]
+
+                    st.dataframe(
+                        recent_display,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "View": st.column_config.LinkColumn("View", width="small", display_text="Open"),
+                        },
+                    )
+                else:
+                    recent_display.columns = ["File", "From", "Subject", "Matched Company", "Injected", "Received"]
+                    st.dataframe(recent_display, use_container_width=True, hide_index=True)
             else:
                 st.info("No emails in log yet.")
 
