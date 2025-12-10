@@ -175,13 +175,23 @@ if "scan_dialog_state" not in st.session_state:
 if "confirmation_text" not in st.session_state:
     st.session_state.confirmation_text = ""
 
-# --------------------------- Header with Scan Button ---------------------------
-header_col1, header_col2 = st.columns([4, 1])
+# Initialize session state for settings page
+if "show_settings" not in st.session_state:
+    st.session_state.show_settings = False
+
+# --------------------------- Header with Scan Button & Settings Gear ---------------------------
+header_col1, header_col2, header_col3 = st.columns([4, 0.5, 1])
 
 with header_col1:
     st.title("Competitor Analysis")
 
 with header_col2:
+    # Settings gear icon
+    if st.button("⚙️", key="btn_settings", help="Settings & Admin Tools"):
+        st.session_state.show_settings = True
+        st.rerun()
+
+with header_col3:
     scan_running = is_scan_running()
 
     if scan_running:
@@ -670,14 +680,356 @@ if query.strip():
     hay = (f["title"].fillna("") + " " + f.get("summary", pd.Series([""] * len(f))).fillna(""))
     f = f[hay.str.lower().str.contains(q, regex=False, na=False)]
 
+# =====================================================================
+# SETTINGS PAGE (shown when gear icon is clicked)
+# =====================================================================
+if st.session_state.show_settings:
+    import yaml
+    import copy
+
+    # Back button
+    if st.button("← Back to Dashboard", key="btn_back_to_main", type="primary"):
+        st.session_state.show_settings = False
+        st.rerun()
+
+    st.title("Settings & Admin Tools")
+    st.divider()
+
+    # Create two columns for the two main sections
+    settings_tab1, settings_tab2 = st.tabs(["⚙️ Configuration", "🔧 Data Quality Tools"])
+
+    # ===================== CONFIGURATION TAB =====================
+    with settings_tab1:
+        CONFIG_PATH = "config/monitors.yaml"
+
+        def load_yaml_config():
+            try:
+                with open(CONFIG_PATH, "r", encoding="utf-8") as cfg_file:
+                    return yaml.safe_load(cfg_file)
+            except Exception as e:
+                st.error(f"Failed to load config: {e}")
+                return None
+
+        # Initialize session state for config editing
+        if "config_competitors" not in st.session_state:
+            config = load_yaml_config()
+            if config:
+                st.session_state.config_competitors = copy.deepcopy(config.get("competitors", []))
+            else:
+                st.session_state.config_competitors = []
+
+        config = load_yaml_config()
+
+        if config:
+            # Global Settings
+            st.subheader("Global Settings")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                current_log_level = config.get("global", {}).get("log_level", "INFO")
+                log_level_options = ["DEBUG", "INFO", "WARNING", "ERROR"]
+                try:
+                    log_level_index = log_level_options.index(current_log_level.upper())
+                except ValueError:
+                    log_level_index = 1
+                new_log_level = st.selectbox(
+                    "Log Level",
+                    options=log_level_options,
+                    index=log_level_index,
+                    help="DEBUG: Verbose logging. INFO: Normal operation.",
+                    key="settings_log_level"
+                )
+
+                current_timeout = config.get("global", {}).get("request_timeout_s", 20)
+                new_timeout = st.number_input(
+                    "Request Timeout (seconds)",
+                    min_value=5,
+                    max_value=120,
+                    value=int(current_timeout),
+                    key="settings_timeout"
+                )
+
+            with col2:
+                current_max_pages = config.get("global", {}).get("max_pages_per_site", 60)
+                new_max_pages = st.number_input(
+                    "Max Pages Per Site",
+                    min_value=10,
+                    max_value=500,
+                    value=int(current_max_pages),
+                    key="settings_max_pages"
+                )
+
+                current_dedupe = config.get("global", {}).get("dedupe_window_days", 365)
+                new_dedupe = st.number_input(
+                    "Dedupe Window (days)",
+                    min_value=30,
+                    max_value=730,
+                    value=int(current_dedupe),
+                    key="settings_dedupe"
+                )
+
+            current_ua = config.get("global", {}).get("user_agent", "")
+            new_ua = st.text_input(
+                "User Agent",
+                value=current_ua,
+                key="settings_user_agent"
+            )
+
+            current_follow = config.get("global", {}).get("follow_within_domain_only", True)
+            new_follow = st.checkbox(
+                "Follow Within Domain Only",
+                value=current_follow,
+                key="settings_follow_domain"
+            )
+
+            st.divider()
+
+            # Competitors Management
+            st.subheader("Monitored Competitors")
+            st.caption(f"Currently monitoring {len(st.session_state.config_competitors)} competitors")
+
+            updated_competitors = []
+            for i, comp in enumerate(st.session_state.config_competitors):
+                with st.container():
+                    col1, col2, col3 = st.columns([2, 3, 0.5])
+                    with col1:
+                        new_name = st.text_input(
+                            "Name" if i == 0 else f"Name###{i}",
+                            value=comp.get("name", ""),
+                            key=f"settings_comp_name_{i}",
+                            label_visibility="visible" if i == 0 else "collapsed"
+                        )
+                    with col2:
+                        urls_str = "\n".join(comp.get("start_urls", []))
+                        new_urls_str = st.text_area(
+                            "Start URLs (one per line)" if i == 0 else f"URLs###{i}",
+                            value=urls_str,
+                            height=68,
+                            key=f"settings_comp_urls_{i}",
+                            label_visibility="visible" if i == 0 else "collapsed"
+                        )
+                    with col3:
+                        st.write("")
+                        if st.button("🗑️", key=f"settings_del_comp_{i}", help=f"Remove {comp.get('name', 'competitor')}"):
+                            st.session_state.config_competitors.pop(i)
+                            st.rerun()
+
+                    if new_name.strip():
+                        updated_competitors.append({
+                            "name": new_name.strip(),
+                            "start_urls": [u.strip() for u in new_urls_str.strip().split("\n") if u.strip()]
+                        })
+
+            st.session_state.config_competitors = updated_competitors
+
+            # Add new competitor
+            st.markdown("**Add New Competitor**")
+            new_comp_col1, new_comp_col2 = st.columns([2, 3])
+            with new_comp_col1:
+                new_comp_name = st.text_input(
+                    "New Competitor Name",
+                    value="",
+                    key="settings_new_comp_name",
+                    placeholder="e.g., Acme Corp"
+                )
+            with new_comp_col2:
+                new_comp_urls = st.text_area(
+                    "Start URLs (one per line)",
+                    value="",
+                    key="settings_new_comp_urls",
+                    height=68,
+                    placeholder="https://example.com/blog"
+                )
+
+            if st.button("➕ Add Competitor", key="settings_btn_add_competitor"):
+                if new_comp_name.strip() and new_comp_urls.strip():
+                    new_urls_list = [u.strip() for u in new_comp_urls.strip().split("\n") if u.strip()]
+                    if new_urls_list:
+                        st.session_state.config_competitors.append({
+                            "name": new_comp_name.strip(),
+                            "start_urls": new_urls_list
+                        })
+                        if "settings_new_comp_name" in st.session_state:
+                            del st.session_state["settings_new_comp_name"]
+                        if "settings_new_comp_urls" in st.session_state:
+                            del st.session_state["settings_new_comp_urls"]
+                        st.success(f"Added '{new_comp_name}' - click Save to persist")
+                        st.rerun()
+                else:
+                    st.warning("Please enter both a name and at least one URL.")
+
+            st.divider()
+
+            # Alert Settings
+            with st.expander("Alert Settings", expanded=False):
+                current_high_impact = config.get("global", {}).get("high_impact_labels", [])
+                new_high_impact = st.text_area(
+                    "High Impact Labels (one per line)",
+                    value="\n".join(current_high_impact),
+                    height=100,
+                    key="settings_high_impact"
+                )
+
+                current_alert_levels = config.get("global", {}).get("alert_on_impact_levels", ["High"])
+                new_alert_levels = st.multiselect(
+                    "Alert on Impact Levels",
+                    options=["High", "Medium", "Low"],
+                    default=[lvl for lvl in current_alert_levels if lvl in ["High", "Medium", "Low"]],
+                    key="settings_alert_levels"
+                )
+
+            # Save / Reset buttons
+            st.divider()
+            col_save, col_reset = st.columns([1, 1])
+
+            with col_save:
+                if st.button("💾 Save Configuration", type="primary", key="settings_btn_save"):
+                    try:
+                        updated_config = {
+                            "global": {
+                                "log_level": new_log_level,
+                                "user_agent": new_ua,
+                                "request_timeout_s": int(new_timeout),
+                                "max_pages_per_site": int(new_max_pages),
+                                "follow_within_domain_only": new_follow,
+                                "dedupe_window_days": int(new_dedupe),
+                                "slack_webhook_env": config.get("global", {}).get("slack_webhook_env", "SLACK_WEBHOOK_URL"),
+                                "high_impact_labels": [l.strip() for l in new_high_impact.strip().split("\n") if l.strip()],
+                                "alert_on_impact_levels": new_alert_levels,
+                            },
+                            "competitors": st.session_state.config_competitors
+                        }
+
+                        tmp_path = CONFIG_PATH + ".tmp"
+                        with open(tmp_path, "w", encoding="utf-8") as cfg_file:
+                            yaml.dump(updated_config, cfg_file, default_flow_style=False, allow_unicode=True, sort_keys=False)
+                        os.replace(tmp_path, CONFIG_PATH)
+
+                        log_user_action(get_client_ip(), "config_save", f"Saved config: {len(st.session_state.config_competitors)} competitors")
+                        logger.info(f"Configuration saved: {len(st.session_state.config_competitors)} competitors")
+                        st.success("✅ Configuration saved!")
+
+                        from app.logger import set_log_level
+                        set_log_level(new_log_level)
+
+                    except Exception as e:
+                        st.error(f"Failed to save: {e}")
+                        logger.error(f"Config save failed: {e}")
+
+            with col_reset:
+                if st.button("🔄 Reload from File", key="settings_btn_reload"):
+                    if "config_competitors" in st.session_state:
+                        del st.session_state.config_competitors
+                    st.rerun()
+
+    # ===================== DATA QUALITY TOOLS TAB =====================
+    with settings_tab2:
+        st.subheader("Enrichment")
+        st.write("Run AI enrichment to add summaries, categories, and impact ratings to crawled articles.")
+
+        # Count pending
+        def _pending_enrichment_count(df_check: pd.DataFrame) -> int:
+            cols = [c for c in ["summary", "category", "impact"] if c in df_check.columns]
+            if not cols:
+                return len(df_check)
+            mask = False
+            for c in cols:
+                mask = mask | (df_check[c].astype(str).str.strip() == "")
+            if "category" in df_check.columns:
+                mask = mask & (df_check["category"] != "Uncategorized")
+            return int(mask.sum())
+
+        pending_count = _pending_enrichment_count(df) if not df.empty else 0
+        st.metric("Articles Pending Enrichment", pending_count)
+
+        if st.button("▶️ Run Enrichment Now", type="primary", key="settings_btn_enrich"):
+            client_ip = get_client_ip()
+            log_user_action(client_ip, "enrichment_start", "Started enrichment job")
+            try:
+                with st.spinner("Running enrichment job…"):
+                    proc = subprocess.run(
+                        [sys.executable, "-m", "jobs.enrich_updates"],
+                        text=True,
+                        capture_output=True,
+                        cwd=os.getcwd(),
+                    )
+                if proc.returncode == 0:
+                    st.success("✅ Enrichment complete!")
+                    log_user_action(client_ip, "enrichment_complete", "Completed successfully")
+                    if proc.stdout:
+                        with st.expander("Output", expanded=False):
+                            st.code(proc.stdout[-3000:], language="bash")
+                else:
+                    st.error("Enrichment failed")
+                    log_user_action(client_ip, "enrichment_error", f"Exit code {proc.returncode}")
+                    if proc.stderr:
+                        st.code(proc.stderr[-3000:], language="bash")
+            except Exception as e:
+                st.error(f"Error: {e}")
+                log_user_action(client_ip, "enrichment_error", str(e))
+            finally:
+                st.cache_data.clear()
+
+        st.divider()
+
+        st.subheader("QA Sampler")
+        st.write("Download a random sample of enriched articles for quality review.")
+
+        # Filter to enriched rows only
+        qf = df.copy()
+        if not qf.empty:
+            for c in ["summary", "category", "impact"]:
+                if c in qf.columns:
+                    qf[c] = qf[c].astype(str)
+            mask = (
+                qf.get("summary", pd.Series([""])).str.strip().ne("") &
+                qf.get("category", pd.Series([""])).str.strip().ne("") &
+                qf.get("impact", pd.Series([""])).str.strip().ne("")
+            )
+            qf = qf[mask]
+
+        if qf.empty:
+            st.info("No enriched articles available for sampling.")
+        else:
+            st.metric("Enriched Articles Available", len(qf))
+
+            c1, c2, c3 = st.columns([1, 1, 1])
+            with c1:
+                fraction = st.slider("Sample %", 5, 30, 10, 1, key="settings_qa_fraction")
+            with c2:
+                min_rows = st.number_input("Min rows", 5, 100, 15, key="settings_qa_min")
+            with c3:
+                seed = st.number_input("Seed", 1, 9999, 42, key="settings_qa_seed")
+
+            n = max(int(len(qf) * fraction / 100), int(min_rows))
+            sample = qf.sample(n=min(n, len(qf)), random_state=int(seed)).copy()
+            qa_cols = [c for c in ["date_ref", "company", "title", "category", "impact", "summary", "source_url"] if c in sample.columns]
+            sample = sample[qa_cols]
+
+            st.caption(f"Sample size: {len(sample)} articles")
+            qa_fname = f"qa_sample_{pd.Timestamp.now(tz='UTC').strftime('%Y%m%d_%H%M')}.csv"
+            st.download_button(
+                "📥 Download QA Sample",
+                data=sample.to_csv(index=False).encode("utf-8"),
+                file_name=qa_fname,
+                mime="text/csv",
+                key="settings_btn_qa_download",
+            )
+
+    # Stop here - don't render the main dashboard
+    st.stop()
+
+# =====================================================================
+# MAIN DASHBOARD (shown when settings page is not active)
+# =====================================================================
+
 # --------------------------- Navigation (Menu) ---------------------------
 SECTION_LABELS = [
     "Posts by Competitor",  # KPIs + chart + feed
     "Export",               # Download filtered CSV
     "Manual Edits",         # editable grid
     "Executive Summary",    # Generate + Download PDF
-    "Data Quality Tools",   # Enrichment + QA together
-    "Config",               # Configuration settings
 ]
 
 # Custom CSS for tab styling
@@ -885,97 +1237,6 @@ elif menu == "Export":
     if st.download_button("Download filtered rows as CSV", data=csv_bytes, file_name=fname, mime="text/csv", key="btn_export_csv"):
         log_user_action(get_client_ip(), "export_csv", f"Exported {len(export_df)} rows to CSV")
 
-# --------------------------- Section: Data Quality Tools (Advanced) ---------------------------
-elif menu == "Data Quality Tools":
-    st.subheader("Data Quality Tools")
-
-    with st.expander("Enrichment", expanded=False):
-        def _pending_enrichment_count(df_disp: pd.DataFrame) -> int:
-            cols = [c for c in ["summary", "category", "impact"] if c in df_disp.columns]
-            if not cols:
-                return len(df_disp)
-            mask = False
-            for c in cols:
-                mask = mask | (df_disp[c].astype(str).str.strip() == "")
-            # don't count defaulted Uncategorized as pending
-            if "category" in df_disp.columns:
-                mask = mask & (df_disp["category"] != "Uncategorized")
-            return int(mask.sum())
-
-        # Build a minimal display to count pending
-        show_cols = [c for c in ["date_ref", "company", "title", "category", "impact", "source_url", "summary"] if c in f.columns]
-        sorted_f = f.sort_values(by=["date_ref"], ascending=False)
-        display = sorted_f[show_cols].copy() if show_cols else sorted_f.copy()
-
-        st.caption(f"Pending in current view: {_pending_enrichment_count(display) if not display.empty else 0}")
-
-        if st.button("Run Enrichment Now", type="primary", key="btn_enrich_now_adv"):
-            client_ip = get_client_ip()
-            log_user_action(client_ip, "enrichment_start", "Started enrichment job")
-            try:
-                with st.spinner("Running enrichment job…"):
-                    proc = subprocess.run(
-                        [sys.executable, "-m", "jobs.enrich_updates"],
-                        text=True,
-                        capture_output=True,
-                        cwd=os.getcwd(),
-                    )
-                if proc.returncode == 0:
-                    st.success("Enrichment complete")
-                    log_user_action(client_ip, "enrichment_complete", "Enrichment completed successfully")
-                    if proc.stdout:
-                        st.code(proc.stdout[-3000:], language="bash")
-                else:
-                    st.error("Enrichment failed")
-                    log_user_action(client_ip, "enrichment_error", f"Enrichment failed: exit code {proc.returncode}")
-                    if proc.stderr:
-                        st.code(proc.stderr[-3000:], language="bash")
-            except Exception as e:
-                st.error(f"Error launching enrichment: {e}")
-                log_user_action(client_ip, "enrichment_error", f"Error launching enrichment: {e}")
-            finally:
-                st.cache_data.clear()
-                st.rerun()
-
-    with st.expander("QA Sampler", expanded=False):
-        qf = f.copy()
-        if not qf.empty:
-            for c in ["summary", "category", "impact", "title", "company", "source_url"]:
-                if c in qf.columns:
-                    qf[c] = qf[c].astype(str)
-
-            mask = (
-                qf.get("summary", "").str.strip().ne("") &
-                qf.get("category", "").str.strip().ne("") &
-                qf.get("impact", "").str.strip().ne("")
-            )
-            qf = qf[mask]
-
-        if qf.empty:
-            st.info("No enriched rows in the current filters.")
-        else:
-            c1, c2, c3 = st.columns([1, 1, 1])
-            with c1:
-                fraction = st.slider("Fraction", 0.05, 0.30, 0.10, 0.01, key="qa_fraction")
-            with c2:
-                min_rows = st.number_input("Min rows", 5, 100, 15, key="qa_min_rows")
-            with c3:
-                seed = st.number_input("Seed", 1, 9999, 42, key="qa_seed")
-
-            n = max(int(len(qf) * fraction), int(min_rows))
-            sample = qf.sample(n=min(n, len(qf)), random_state=int(seed)).copy()
-            qa_cols = [c for c in ["date_ref","company","title","category","impact","summary","source_url"] if c in sample.columns]
-            sample = sample[qa_cols]
-            st.caption(f"Sample size: {len(sample)}")
-            qa_fname = f"qa_sample_{pd.Timestamp.now(tz='UTC').strftime('%Y%m%d_%H%M')}.csv"
-            st.download_button(
-                "Download QA sample",
-                data=sample.to_csv(index=False).encode("utf-8"),
-                file_name=qa_fname,
-                mime="text/csv",
-                key="btn_qa_csv_adv",
-            )
-
 # --------------------------- Section: Manual Edits ---------------------------
 elif menu == "Manual Edits":
     st.subheader("Manual Edit (Summary, Category, Impact)")
@@ -1107,289 +1368,3 @@ elif menu == "Executive Summary":
                     for t in b["highlights"]:
                         st.markdown(f"- {t}")
 
-# --------------------------- Section: Config ---------------------------
-elif menu == "Config":
-    import yaml
-    import copy
-
-    st.subheader("Configuration Settings")
-    st.caption("Edit application settings stored in `config/monitors.yaml`")
-
-    CONFIG_PATH = "config/monitors.yaml"
-
-    # Load config from file (no caching - always fresh)
-    def load_yaml_config():
-        try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as cfg_file:
-                return yaml.safe_load(cfg_file)
-        except Exception as e:
-            st.error(f"Failed to load config: {e}")
-            return None
-
-    # Initialize session state for config editing
-    if "config_competitors" not in st.session_state:
-        config = load_yaml_config()
-        if config:
-            st.session_state.config_competitors = copy.deepcopy(config.get("competitors", []))
-            st.session_state.config_loaded = True
-        else:
-            st.session_state.config_competitors = []
-            st.session_state.config_loaded = False
-
-    config = load_yaml_config()
-
-    if config:
-        # Global Settings
-        with st.expander("Global Settings", expanded=True):
-            st.markdown("**Logging & Crawl Settings**")
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                # Log level
-                current_log_level = config.get("global", {}).get("log_level", "INFO")
-                log_level_options = ["DEBUG", "INFO", "WARNING", "ERROR"]
-                try:
-                    log_level_index = log_level_options.index(current_log_level.upper())
-                except ValueError:
-                    log_level_index = 1  # Default to INFO
-                new_log_level = st.selectbox(
-                    "Log Level",
-                    options=log_level_options,
-                    index=log_level_index,
-                    help="DEBUG: Verbose logging for troubleshooting. INFO: Normal operation.",
-                    key="cfg_log_level"
-                )
-
-                # Request timeout
-                current_timeout = config.get("global", {}).get("request_timeout_s", 20)
-                new_timeout = st.number_input(
-                    "Request Timeout (seconds)",
-                    min_value=5,
-                    max_value=120,
-                    value=int(current_timeout),
-                    help="How long to wait for a page to load before giving up.",
-                    key="cfg_timeout"
-                )
-
-            with col2:
-                # Max pages per site
-                current_max_pages = config.get("global", {}).get("max_pages_per_site", 60)
-                new_max_pages = st.number_input(
-                    "Max Pages Per Site",
-                    min_value=10,
-                    max_value=500,
-                    value=int(current_max_pages),
-                    help="Maximum number of pages to crawl per competitor.",
-                    key="cfg_max_pages"
-                )
-
-                # Dedupe window
-                current_dedupe = config.get("global", {}).get("dedupe_window_days", 365)
-                new_dedupe = st.number_input(
-                    "Dedupe Window (days)",
-                    min_value=30,
-                    max_value=730,
-                    value=int(current_dedupe),
-                    help="Days to look back for duplicate detection.",
-                    key="cfg_dedupe"
-                )
-
-            # User agent
-            current_ua = config.get("global", {}).get("user_agent", "")
-            new_ua = st.text_input(
-                "User Agent",
-                value=current_ua,
-                help="The user agent string sent when crawling websites.",
-                key="cfg_user_agent"
-            )
-
-            # Follow within domain only
-            current_follow = config.get("global", {}).get("follow_within_domain_only", True)
-            new_follow = st.checkbox(
-                "Follow Within Domain Only",
-                value=current_follow,
-                help="Only follow links that stay within the competitor's domain.",
-                key="cfg_follow_domain"
-            )
-
-        # Competitors Management
-        with st.expander("Competitors", expanded=True):
-            st.markdown("**Monitored Competitors**")
-            st.caption(f"Currently monitoring {len(st.session_state.config_competitors)} competitors (in session state)")
-
-            # Debug: show raw session state
-            st.caption(f"🐛 Session state keys: {[c.get('name') for c in st.session_state.config_competitors]}")
-
-            # Build list of competitors from session state with editable fields
-            updated_competitors = []
-            for i, comp in enumerate(st.session_state.config_competitors):
-                with st.container():
-                    col1, col2, col3 = st.columns([2, 3, 0.5])
-                    with col1:
-                        new_name = st.text_input(
-                            "Name" if i == 0 else f"Name {i+1}",
-                            value=comp.get("name", ""),
-                            key=f"comp_name_{i}",
-                            label_visibility="visible" if i == 0 else "collapsed"
-                        )
-                    with col2:
-                        urls_str = "\n".join(comp.get("start_urls", []))
-                        new_urls_str = st.text_area(
-                            "Start URLs (one per line)" if i == 0 else f"URLs {i+1}",
-                            value=urls_str,
-                            height=68,
-                            key=f"comp_urls_{i}",
-                            label_visibility="visible" if i == 0 else "collapsed"
-                        )
-                    with col3:
-                        st.write("")  # Spacing
-                        if st.button("🗑️", key=f"del_comp_{i}", help=f"Remove {comp.get('name', 'competitor')}"):
-                            st.session_state.config_competitors.pop(i)
-                            st.rerun()
-
-                    # Update the competitor data
-                    if new_name.strip():
-                        updated_competitors.append({
-                            "name": new_name.strip(),
-                            "start_urls": [u.strip() for u in new_urls_str.strip().split("\n") if u.strip()]
-                        })
-                    st.divider()
-
-            # Update session state with edited values
-            st.caption(f"🐛 Updated competitors from form: {[c.get('name') for c in updated_competitors]}")
-            st.session_state.config_competitors = updated_competitors
-
-            # Add new competitor section
-            st.markdown("**Add New Competitor**")
-            new_comp_col1, new_comp_col2 = st.columns([2, 3])
-            with new_comp_col1:
-                new_comp_name = st.text_input(
-                    "New Competitor Name",
-                    value="",
-                    key="new_comp_name",
-                    placeholder="e.g., Acme Corp"
-                )
-            with new_comp_col2:
-                new_comp_urls = st.text_area(
-                    "Start URLs (one per line)",
-                    value="",
-                    key="new_comp_urls",
-                    height=68,
-                    placeholder="https://example.com/blog"
-                )
-
-            if st.button("➕ Add Competitor", key="btn_add_competitor"):
-                if new_comp_name.strip() and new_comp_urls.strip():
-                    new_urls_list = [u.strip() for u in new_comp_urls.strip().split("\n") if u.strip()]
-                    if new_urls_list:
-                        st.session_state.config_competitors.append({
-                            "name": new_comp_name.strip(),
-                            "start_urls": new_urls_list
-                        })
-                        # Clear the input fields by removing their keys from session state
-                        if "new_comp_name" in st.session_state:
-                            del st.session_state["new_comp_name"]
-                        if "new_comp_urls" in st.session_state:
-                            del st.session_state["new_comp_urls"]
-                        st.success(f"Added '{new_comp_name}' - click Save Configuration to persist changes")
-                        st.rerun()
-                else:
-                    st.warning("Please enter both a name and at least one URL.")
-
-        # Alert Settings
-        with st.expander("Alert Settings", expanded=False):
-            st.markdown("**Impact & Alert Configuration**")
-
-            # High impact labels
-            current_high_impact = config.get("global", {}).get("high_impact_labels", [])
-            new_high_impact = st.text_area(
-                "High Impact Labels (one per line)",
-                value="\n".join(current_high_impact),
-                height=100,
-                help="Categories considered high impact.",
-                key="cfg_high_impact"
-            )
-
-            # Alert on impact levels
-            current_alert_levels = config.get("global", {}).get("alert_on_impact_levels", ["High"])
-            new_alert_levels = st.multiselect(
-                "Alert on Impact Levels",
-                options=["High", "Medium", "Low"],
-                default=[lvl for lvl in current_alert_levels if lvl in ["High", "Medium", "Low"]],
-                help="Which impact levels should trigger alerts.",
-                key="cfg_alert_levels"
-            )
-
-        # Save Configuration
-        st.divider()
-
-        # Debug: show what will be saved
-        with st.expander("🐛 Debug: Data to be saved", expanded=False):
-            st.write(f"Competitors in session state: {len(st.session_state.config_competitors)}")
-            for i, c in enumerate(st.session_state.config_competitors):
-                st.write(f"  {i+1}. {c.get('name', 'NO NAME')} - {len(c.get('start_urls', []))} URLs")
-
-        col_save, col_reset = st.columns([1, 1])
-
-        with col_save:
-            if st.button("💾 Save Configuration", type="primary", key="btn_save_config"):
-                try:
-                    st.info(f"Attempting to save {len(st.session_state.config_competitors)} competitors...")
-
-                    # Build updated config from current form values
-                    updated_config = {
-                        "global": {
-                            "log_level": new_log_level,
-                            "user_agent": new_ua,
-                            "request_timeout_s": int(new_timeout),
-                            "max_pages_per_site": int(new_max_pages),
-                            "follow_within_domain_only": new_follow,
-                            "dedupe_window_days": int(new_dedupe),
-                            "slack_webhook_env": config.get("global", {}).get("slack_webhook_env", "SLACK_WEBHOOK_URL"),
-                            "high_impact_labels": [l.strip() for l in new_high_impact.strip().split("\n") if l.strip()],
-                            "alert_on_impact_levels": new_alert_levels,
-                        },
-                        "competitors": st.session_state.config_competitors
-                    }
-
-                    # Write to file with atomic replace
-                    tmp_path = CONFIG_PATH + ".tmp"
-                    st.info(f"Writing to temp file: {tmp_path}")
-                    st.write("Config to save:", updated_config)
-
-                    with open(tmp_path, "w", encoding="utf-8") as cfg_file:
-                        yaml.dump(updated_config, cfg_file, default_flow_style=False, allow_unicode=True, sort_keys=False)
-
-                    st.info(f"Replacing {CONFIG_PATH} with temp file...")
-                    os.replace(tmp_path, CONFIG_PATH)
-
-                    log_user_action(get_client_ip(), "config_save", f"Saved config: {len(st.session_state.config_competitors)} competitors")
-                    logger.info(f"Configuration saved: log_level={new_log_level}, max_pages={new_max_pages}, competitors={len(st.session_state.config_competitors)}")
-
-                    st.success(f"✅ Configuration saved to {CONFIG_PATH}!")
-
-                    # Reload log level dynamically
-                    from app.logger import set_log_level
-                    set_log_level(new_log_level)
-
-                except Exception as e:
-                    st.error(f"Failed to save configuration: {e}")
-                    logger.error(f"Config save failed: {e}")
-                    log_user_action(get_client_ip(), "config_error", f"Failed to save: {e}")
-
-        with col_reset:
-            if st.button("🔄 Reload from File", key="btn_reload_config"):
-                # Clear session state and reload from file
-                if "config_competitors" in st.session_state:
-                    del st.session_state.config_competitors
-                st.rerun()
-
-        # View Raw YAML (current file on disk)
-        with st.expander("View Raw YAML (current file)", expanded=False):
-            try:
-                with open(CONFIG_PATH, "r", encoding="utf-8") as cfg_file:
-                    current_yaml = cfg_file.read()
-                st.code(current_yaml, language="yaml")
-            except Exception as e:
-                st.error(f"Could not read config file: {e}")
