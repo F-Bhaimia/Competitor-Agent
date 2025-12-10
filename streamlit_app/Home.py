@@ -1214,170 +1214,26 @@ if menu == "Posts by Competitor":
     if "category" in display.columns:
         display["category"] = display["category"].apply(lambda s: s if str(s).strip() else "Uncategorized")
 
-    # Build custom HTML table with sticky header, truncated rows, and copy button
-    feed_css = """
-    <style>
-    .feed-container {
-        max-height: 500px;
-        overflow-y: auto;
-        border: 1px solid #e0e0e0;
-        border-radius: 8px;
-    }
-    .feed-table {
-        width: 100%;
-        border-collapse: collapse;
-        table-layout: fixed;
-    }
-    .feed-table thead {
-        position: sticky;
-        top: 0;
-        background: #f8f9fa;
-        z-index: 10;
-    }
-    .feed-table th {
-        padding: 10px 8px;
-        text-align: left;
-        font-weight: 600;
-        border-bottom: 2px solid #dee2e6;
-        white-space: nowrap;
-    }
-    .feed-table td {
-        padding: 8px;
-        border-bottom: 1px solid #eee;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 0;
-        vertical-align: middle;
-    }
-    .feed-table tr:hover {
-        background-color: #f5f5f5;
-    }
-    .feed-table td a {
-        color: #1a73e8;
-        text-decoration: none;
-    }
-    .feed-table td a:hover {
-        text-decoration: underline;
-    }
-    .summary-cell {
-        position: relative;
-        cursor: help;
-    }
-    .summary-text {
-        display: inline-block;
-        max-width: calc(100% - 28px);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        vertical-align: middle;
-    }
-    .copy-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 22px;
-        height: 22px;
-        margin-left: 4px;
-        border: none;
-        background: transparent;
-        cursor: pointer;
-        border-radius: 4px;
-        vertical-align: middle;
-        opacity: 0.5;
-        transition: opacity 0.2s, background 0.2s;
-    }
-    .copy-btn:hover {
-        opacity: 1;
-        background: #e8e8e8;
-    }
-    .copy-btn svg {
-        width: 14px;
-        height: 14px;
-    }
-    /* Column widths */
-    .col-date { width: 90px; }
-    .col-company { width: 120px; }
-    .col-title { width: 25%; }
-    .col-category { width: 100px; }
-    .col-impact { width: 70px; }
-    .col-summary { width: auto; }
-    </style>
-    <script>
-    function copyToClipboard(text, btn) {
-        navigator.clipboard.writeText(text).then(function() {
-            btn.innerHTML = '✓';
-            setTimeout(function() {
-                btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
-            }, 1500);
-        });
-    }
-    </script>
-    """
+    # Reorder and prepare columns for display
+    ui_cols = [c for c in ["date_ref", "company", "title", "category", "impact", "summary", "source_url"] if c in display.columns]
+    display = display[ui_cols]
 
-    # Build table rows
-    table_rows = []
-    for _, row in display.iterrows():
-        date_val = escape(str(row.get("date_ref", "")))
-        company_val = escape(str(row.get("company", "")))
-        category_val = escape(str(row.get("category", "")))
-        summary_val = str(row.get("summary", ""))
-        summary_escaped = escape(summary_val)
-        summary_for_js = summary_val.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ").replace("\r", "")
-
-        # Title with link
-        title_val = str(row.get("title", ""))
-        url_val = str(row.get("source_url", ""))
-        if url_val:
-            title_html = f'<a href="{escape(url_val)}" target="_blank" rel="noopener">{escape(title_val)}</a>'
-        else:
-            title_html = escape(title_val)
-
-        # Impact badge
-        impact_val = str(row.get("impact", "")).strip().title()
-        if impact_val in ["High", "Medium", "Low"]:
-            color = {"High": "red", "Medium": "orange", "Low": "gray"}.get(impact_val, "gray")
-            impact_html = f'<span style="background:{color};color:white;padding:2px 8px;border-radius:12px;font-size:11px;">{impact_val}</span>'
-        else:
-            impact_html = ""
-
-        # Summary with copy button
-        copy_icon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>'
-        summary_html = f'''<span class="summary-text" title="{summary_escaped}">{summary_escaped}</span><button class="copy-btn" onclick="copyToClipboard('{summary_for_js}', this)" title="Copy summary">{copy_icon}</button>''' if summary_val else ""
-
-        table_rows.append(f"""
-        <tr>
-            <td class="col-date">{date_val}</td>
-            <td class="col-company" title="{company_val}">{company_val}</td>
-            <td class="col-title" title="{escape(title_val)}">{title_html}</td>
-            <td class="col-category" title="{category_val}">{category_val}</td>
-            <td class="col-impact">{impact_html}</td>
-            <td class="col-summary summary-cell">{summary_html}</td>
-        </tr>
-        """)
-
-    feed_html = f"""
-    {feed_css}
-    <div class="feed-container">
-        <table class="feed-table">
-            <thead>
-                <tr>
-                    <th class="col-date">Date</th>
-                    <th class="col-company">Company</th>
-                    <th class="col-title">Title</th>
-                    <th class="col-category">Category</th>
-                    <th class="col-impact">Impact</th>
-                    <th class="col-summary">Summary</th>
-                </tr>
-            </thead>
-            <tbody>
-                {''.join(table_rows)}
-            </tbody>
-        </table>
-    </div>
-    """
-
-    st.markdown(feed_html, unsafe_allow_html=True)
+    # Use st.dataframe with column configuration for proper scrollable table
+    st.dataframe(
+        display,
+        use_container_width=True,
+        height=400,
+        column_config={
+            "date_ref": st.column_config.TextColumn("Date", width="small"),
+            "company": st.column_config.TextColumn("Company", width="small"),
+            "title": st.column_config.TextColumn("Title", width="medium"),
+            "category": st.column_config.TextColumn("Category", width="small"),
+            "impact": st.column_config.TextColumn("Impact", width="small"),
+            "summary": st.column_config.TextColumn("Summary", width="large"),
+            "source_url": st.column_config.LinkColumn("Link", width="small", display_text="Open"),
+        },
+        hide_index=True,
+    )
 
 # --------------------------- Section: Export ---------------------------
 elif menu == "Export":
