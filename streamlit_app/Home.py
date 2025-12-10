@@ -695,8 +695,8 @@ if st.session_state.show_settings:
     st.title("Settings & Admin Tools")
     st.divider()
 
-    # Create two columns for the two main sections
-    settings_tab1, settings_tab2 = st.tabs(["⚙️ Configuration", "🔧 Data Quality Tools"])
+    # Create tabs for the settings sections
+    settings_tab1, settings_tab2, settings_tab3 = st.tabs(["⚙️ Configuration", "🏷️ Categories", "🔧 Data Quality Tools"])
 
     # ===================== CONFIGURATION TAB =====================
     with settings_tab1:
@@ -952,8 +952,165 @@ if st.session_state.show_settings:
                 except Exception as e:
                     st.error(f"Could not read config file: {e}")
 
-    # ===================== DATA QUALITY TOOLS TAB =====================
+    # ===================== CATEGORIES TAB =====================
     with settings_tab2:
+        CONFIG_PATH = "config/monitors.yaml"
+
+        def load_yaml_config_for_categories():
+            try:
+                with open(CONFIG_PATH, "r", encoding="utf-8") as cfg_file:
+                    return yaml.safe_load(cfg_file)
+            except Exception as e:
+                st.error(f"Failed to load config: {e}")
+                return None
+
+        config_cat = load_yaml_config_for_categories()
+
+        if config_cat:
+            classification = config_cat.get("classification", {})
+
+            # Initialize session state for categories
+            if "config_categories" not in st.session_state:
+                st.session_state.config_categories = classification.get("categories", [
+                    "Product/Feature", "Pricing/Plans", "Partnership", "Acquisition/Investment",
+                    "Case Study/Customer", "Events/Webinar", "Best Practices/Guides",
+                    "Security/Compliance", "Hiring/Leadership", "Company News", "Other"
+                ])
+
+            st.subheader("Content Categories")
+            st.caption("Categories used by AI to classify competitor content. 'Other' is always included as fallback.")
+
+            # Display current categories with delete buttons
+            categories_to_keep = []
+            for i, cat in enumerate(st.session_state.config_categories):
+                col1, col2 = st.columns([5, 1])
+                with col1:
+                    st.text(f"  {cat}")
+                with col2:
+                    # Don't allow deleting "Other" category
+                    if cat == "Other":
+                        st.text("(required)")
+                    else:
+                        if st.button("🗑️", key=f"del_cat_{i}", help=f"Delete '{cat}'"):
+                            st.session_state.config_categories.remove(cat)
+                            st.rerun()
+
+            st.divider()
+
+            # Add new category
+            st.markdown("**Add New Category**")
+            add_col1, add_col2 = st.columns([4, 1])
+            with add_col1:
+                new_category = st.text_input(
+                    "New Category Name",
+                    value="",
+                    key="new_category_name",
+                    placeholder="e.g., Industry Trends"
+                )
+            with add_col2:
+                st.write("")  # Spacer
+                if st.button("➕ Add", key="btn_add_category"):
+                    if new_category.strip():
+                        if new_category.strip() not in st.session_state.config_categories:
+                            # Insert before "Other" if it exists
+                            if "Other" in st.session_state.config_categories:
+                                other_idx = st.session_state.config_categories.index("Other")
+                                st.session_state.config_categories.insert(other_idx, new_category.strip())
+                            else:
+                                st.session_state.config_categories.append(new_category.strip())
+                            st.success(f"Added '{new_category.strip()}'")
+                            if "new_category_name" in st.session_state:
+                                del st.session_state["new_category_name"]
+                            st.rerun()
+                        else:
+                            st.warning("Category already exists.")
+                    else:
+                        st.warning("Please enter a category name.")
+
+            st.divider()
+
+            # Impact Rules
+            st.subheader("Impact Classification Rules")
+            st.caption("Define what triggers High, Medium, or Low impact scores.")
+
+            impact_rules = classification.get("impact_rules", {})
+
+            high_rules = st.text_area(
+                "High Impact Triggers (one per line)",
+                value="\n".join(impact_rules.get("high", ["pricing change", "major feature GA", "acquisitions", "big partnerships", "security incidents"])),
+                height=100,
+                key="impact_rules_high",
+                help="Content matching these will be marked High impact"
+            )
+
+            medium_rules = st.text_area(
+                "Medium Impact Triggers (one per line)",
+                value="\n".join(impact_rules.get("medium", ["meaningful feature update", "big case study", "notable event announcements"])),
+                height=80,
+                key="impact_rules_medium"
+            )
+
+            low_rules = st.text_area(
+                "Low Impact Triggers (one per line)",
+                value="\n".join(impact_rules.get("low", ["generic tips", "routine posts"])),
+                height=80,
+                key="impact_rules_low"
+            )
+
+            st.divider()
+
+            # Industry Context
+            st.subheader("Industry Context")
+            industry_context = st.text_input(
+                "Industry Context for AI",
+                value=classification.get("industry_context", "membership/club management software"),
+                key="industry_context_input",
+                help="This context is provided to the AI when classifying content"
+            )
+
+            st.divider()
+
+            # Save button
+            if st.button("💾 Save Categories & Rules", type="primary", key="btn_save_categories"):
+                try:
+                    # Ensure "Other" is in categories
+                    final_categories = st.session_state.config_categories.copy()
+                    if "Other" not in final_categories:
+                        final_categories.append("Other")
+
+                    # Build updated config
+                    updated_config = config_cat.copy()
+                    updated_config["classification"] = {
+                        "categories": final_categories,
+                        "impact_rules": {
+                            "high": [r.strip() for r in high_rules.strip().split("\n") if r.strip()],
+                            "medium": [r.strip() for r in medium_rules.strip().split("\n") if r.strip()],
+                            "low": [r.strip() for r in low_rules.strip().split("\n") if r.strip()],
+                        },
+                        "industry_context": industry_context.strip()
+                    }
+
+                    tmp_path = CONFIG_PATH + ".tmp"
+                    with open(tmp_path, "w", encoding="utf-8") as cfg_file:
+                        yaml.dump(updated_config, cfg_file, default_flow_style=False, allow_unicode=True, sort_keys=False)
+                    os.replace(tmp_path, CONFIG_PATH)
+
+                    log_user_action(get_client_ip(), "categories_save", f"Saved {len(final_categories)} categories")
+                    logger.info(f"Categories saved: {len(final_categories)} categories")
+                    st.success("✅ Categories and rules saved!")
+
+                except Exception as e:
+                    st.error(f"Failed to save: {e}")
+                    logger.error(f"Categories save failed: {e}")
+
+            # Reload button
+            if st.button("🔄 Reload from File", key="btn_reload_categories"):
+                if "config_categories" in st.session_state:
+                    del st.session_state.config_categories
+                st.rerun()
+
+    # ===================== DATA QUALITY TOOLS TAB =====================
+    with settings_tab3:
         st.subheader("Enrichment")
         st.write("Run AI enrichment to add summaries, categories, and impact ratings to crawled articles.")
 
