@@ -14,6 +14,7 @@ import csv
 import json
 import os
 import re
+import threading
 from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -21,7 +22,7 @@ from typing import Any, Dict, Optional
 import yaml
 import pandas as pd
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 import uvicorn
 
 from app.logger import (
@@ -32,8 +33,50 @@ from app.logger import (
     log_email_error,
     log_email_processed,
 )
+from app.email_matcher import (
+    match_email_to_competitor,
+    check_email_quality,
+    record_email_received,
+    record_email_matched,
+    record_email_injected,
+)
 
 logger = get_system_logger("webhook")
+
+# Enrichment lock to prevent concurrent runs
+_enrichment_lock = threading.Lock()
+_enrichment_running = False
+
+
+def run_enrichment_background():
+    """Run enrichment in background thread (non-blocking)."""
+    global _enrichment_running
+
+    # Skip if already running
+    if _enrichment_running:
+        logger.debug("Enrichment already running, skipping")
+        return
+
+    def _run():
+        global _enrichment_running
+        with _enrichment_lock:
+            if _enrichment_running:
+                return
+            _enrichment_running = True
+
+        try:
+            logger.info("Starting background enrichment...")
+            from jobs.enrich_updates import main as run_enrichment
+            run_enrichment()
+            logger.info("Background enrichment complete")
+        except Exception as e:
+            logger.warning(f"Background enrichment failed: {e}")
+        finally:
+            _enrichment_running = False
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
 
 # Paths
 CONFIG_PATH = Path("config/monitors.yaml")
@@ -169,7 +212,15 @@ def extract_plain_text(payload: Dict) -> str:
 def process_email_immediately(filepath: Path, payload: Dict, config: Dict) -> Optional[Dict]:
     """
     Process a single email immediately after receipt.
-    Returns the row dict if added to updates.csv, None if skipped.
+    Uses AI to match to competitor and quality gate before injection.
+
+    Pipeline stages tracked in emails.csv and email_senders.csv:
+    1. received - email logged to emails.csv, sender received count incremented
+    2. matched - AI matched to competitor, sender processed count incremented
+    3. qualified - AI quality gate passed (is this real newsletter content?)
+    4. injected - added to updates.csv, sender injected count incremented
+
+    Returns the row dict if added to updates.csv, None if rejected at any stage.
     """
     existing_ids = load_existing_ids()
 
@@ -179,6 +230,7 @@ def process_email_immediately(filepath: Path, payload: Dict, config: Dict) -> Op
     # Extract fields
     subject = headers.get("subject") or headers.get("Subject") or "(No Subject)"
     from_addr = envelope.get("from", "") or headers.get("from") or headers.get("From") or "unknown"
+    to_addr = envelope.get("to", "") or headers.get("to") or headers.get("To") or "unknown"
     message_id = (
         headers.get("message_id") or headers.get("Message-ID") or headers.get("Message-Id") or
         payload.get("_webhook_metadata", {}).get("received_at", "")
@@ -197,20 +249,42 @@ def process_email_immediately(filepath: Path, payload: Dict, config: Dict) -> Op
     # Extract body
     body = extract_plain_text(payload)
 
-    # Match to competitor
-    company = match_competitor(from_addr, subject, body, config)
-    if not company:
-        company = "Newsletter (Unmatched)"
+    # STAGE 1: Record email received (logs to emails.csv, updates sender received count)
+    record_email_received(
+        json_file=filepath.name,
+        from_address=from_addr,
+        to_address=to_addr,
+        date=date_str,
+        subject=subject,
+    )
 
-    # Generate ID
+    # STAGE 2: Use AI to match to competitor
+    logger.info(f"Matching email from '{from_addr}' to competitors...")
+    company = match_email_to_competitor(from_addr, subject, body)
+
+    # If no match, stop here
+    if not company:
+        logger.info(f"Email from '{from_addr}' did not match any competitor - saved to emails.csv only")
+        return None
+
+    # Record the match (updates emails.csv and sender processed count)
+    record_email_matched(filepath.name, from_addr, company)
+
+    # STAGE 3: Quality gate - is this email worth processing?
+    logger.info(f"Running quality gate for '{subject[:50]}...'")
+    if not check_email_quality(from_addr, subject, body):
+        logger.info(f"Email rejected by quality gate: '{subject}' - not injecting")
+        return None
+
+    # Generate ID for deduplication
     row_id = make_id(company, message_id)
 
-    # Check for duplicates
+    # Check for duplicates in updates.csv
     if row_id in existing_ids:
         logger.debug(f"Skipping duplicate email: {subject}")
         return None
 
-    # Create row
+    # STAGE 4: Inject into updates.csv
     row = {
         "id": row_id,
         "company": company,
@@ -228,6 +302,9 @@ def process_email_immediately(filepath: Path, payload: Dict, config: Dict) -> Op
     with open(DATA_PATH, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=COLUMNS)
         writer.writerow(row)
+
+    # Record injection (updates emails.csv and sender injected count)
+    record_email_injected(filepath.name, from_addr)
 
     # Update parquet mirror
     try:
@@ -332,6 +409,10 @@ async def receive_email(request: Request):
         if result:
             log_email_processed(filename, result["company"], result["title"])
             log_user_action("webhook", "email_processed", f"[{result['company']}] {subject}")
+
+            # Trigger background enrichment for the new entry
+            run_enrichment_background()
+
             return JSONResponse(
                 status_code=200,
                 content={
@@ -343,14 +424,15 @@ async def receive_email(request: Request):
                 }
             )
         else:
-            log_user_action("webhook", "email_received", f"From: {from_addr}, Subject: {subject} (duplicate, skipped)")
+            log_user_action("webhook", "email_received", f"From: {from_addr}, Subject: {subject} (unmatched or duplicate)")
             return JSONResponse(
                 status_code=200,
                 content={
                     "status": "success",
-                    "message": "Email received but skipped (duplicate)",
+                    "message": "Email received and logged (no competitor match or duplicate)",
                     "filename": filename,
                     "added_to_updates": False,
+                    "saved_to_emails_csv": True,
                 }
             )
 
@@ -389,6 +471,176 @@ async def list_emails(limit: int = 20):
     return {"count": len(files), "emails": emails}
 
 
+def format_email_html(payload: Dict, filename: str) -> str:
+    """Format email payload as a nicely styled HTML page with links intact."""
+    from html import escape
+
+    headers = payload.get("headers", {})
+    envelope = payload.get("envelope", {})
+
+    subject = headers.get("subject") or headers.get("Subject") or "(No Subject)"
+    from_addr = envelope.get("from", "") or headers.get("from") or headers.get("From") or "unknown"
+    to_addr = envelope.get("to", "") or headers.get("to") or headers.get("To") or "unknown"
+    date_str = headers.get("date") or headers.get("Date") or ""
+
+    # Get body content - prefer HTML for link preservation, fall back to plain
+    html_body = payload.get("html", "") or ""
+    plain_body = payload.get("plain", "") or ""
+
+    # If we have HTML, use it (links will be preserved)
+    # Otherwise, convert plain text to HTML with link detection
+    if html_body.strip():
+        body_content = html_body
+        body_type = "HTML"
+    else:
+        # Convert plain text to HTML, detecting and linking URLs
+        def linkify(text):
+            url_pattern = r'(https?://[^\s<>"\']+)'
+            return re.sub(url_pattern, r'<a href="\1" target="_blank">\1</a>', escape(text))
+
+        body_content = f'<pre style="white-space: pre-wrap; word-wrap: break-word; font-family: inherit;">{linkify(plain_body)}</pre>'
+        body_type = "Plain Text"
+
+    return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{escape(subject)}</title>
+    <style>
+        * {{
+            box-sizing: border-box;
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+        }}
+        .email-container {{
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }}
+        .email-header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 24px;
+        }}
+        .email-subject {{
+            font-size: 1.5em;
+            font-weight: 600;
+            margin: 0 0 16px 0;
+        }}
+        .email-meta {{
+            display: grid;
+            gap: 8px;
+            font-size: 0.9em;
+            opacity: 0.95;
+        }}
+        .email-meta-row {{
+            display: flex;
+            gap: 8px;
+        }}
+        .email-meta-label {{
+            font-weight: 600;
+            min-width: 60px;
+        }}
+        .email-meta-value {{
+            word-break: break-all;
+        }}
+        .email-body {{
+            padding: 24px;
+        }}
+        .email-body img {{
+            max-width: 100%;
+            height: auto;
+        }}
+        .email-body a {{
+            color: #667eea;
+        }}
+        .email-footer {{
+            background: #f8f9fa;
+            padding: 16px 24px;
+            font-size: 0.85em;
+            color: #666;
+            border-top: 1px solid #eee;
+        }}
+        .badge {{
+            display: inline-block;
+            padding: 2px 8px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 4px;
+            font-size: 0.8em;
+            margin-left: 8px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="email-header">
+            <h1 class="email-subject">{escape(subject)}</h1>
+            <div class="email-meta">
+                <div class="email-meta-row">
+                    <span class="email-meta-label">From:</span>
+                    <span class="email-meta-value">{escape(from_addr)}</span>
+                </div>
+                <div class="email-meta-row">
+                    <span class="email-meta-label">To:</span>
+                    <span class="email-meta-value">{escape(to_addr)}</span>
+                </div>
+                <div class="email-meta-row">
+                    <span class="email-meta-label">Date:</span>
+                    <span class="email-meta-value">{escape(date_str)}</span>
+                </div>
+            </div>
+        </div>
+        <div class="email-body">
+            {body_content}
+        </div>
+        <div class="email-footer">
+            <strong>Source:</strong> {escape(filename)} <span class="badge">{body_type}</span>
+        </div>
+    </div>
+</body>
+</html>'''
+
+
+@app.get("/email/view/{email_id}")
+async def view_email(email_id: str):
+    """
+    View a formatted email by its ID (filename stem without .json).
+
+    Looks in both data/emails/ and data/emails/processed/.
+    Returns a nicely formatted HTML page with links intact.
+    """
+    ensure_emails_dir()
+
+    # Try to find the email file
+    filename = f"{email_id}.json"
+    filepath = EMAILS_DIR / filename
+
+    if not filepath.exists():
+        # Try processed folder
+        filepath = PROCESSED_DIR / filename
+
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail=f"Email not found: {email_id}")
+
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading email: {e}")
+
+    html_content = format_email_html(payload, filename)
+    return HTMLResponse(content=html_content)
+
+
 def main():
     """Run the webhook server."""
     config = load_config()
@@ -406,6 +658,7 @@ def main():
     print(f"  Webhook endpoint: POST /email")
     print(f"  Health check: GET /health")
     print(f"  List emails: GET /emails")
+    print(f"  View email: GET /email/view/{{email_id}}")
     print(f"{'='*60}\n")
 
     uvicorn.run(

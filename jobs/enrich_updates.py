@@ -2,6 +2,7 @@
 import os
 import time
 import pandas as pd
+from dateutil import parser as dateparser
 from app.classify import classify_article
 
 RAW_PATH = "data/updates.csv"
@@ -23,6 +24,24 @@ def _ensure_str_cols(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
     df[cols] = df[cols].astype(str).fillna("")
     return df
 
+
+def _parse_datetime_to_utc(value):
+    """Parse a datetime string to UTC-aware datetime, handling various formats."""
+    if pd.isna(value) or value in ("", "nan", "NaN", "None", "NaT"):
+        return pd.NaT
+    try:
+        # dateutil.parser handles timezone-aware ISO strings properly
+        dt = dateparser.parse(str(value))
+        if dt is None:
+            return pd.NaT
+        # Convert to UTC if timezone-aware, else assume UTC
+        if dt.tzinfo is not None:
+            return dt.astimezone(pd.Timestamp.now('UTC').tzinfo)
+        else:
+            return dt.replace(tzinfo=pd.Timestamp.now('UTC').tzinfo)
+    except Exception:
+        return pd.NaT
+
 def load_raw() -> pd.DataFrame:
     if not os.path.exists(RAW_PATH):
         print("No raw updates found.")
@@ -33,17 +52,13 @@ def load_raw() -> pd.DataFrame:
     # Ensure required string cols exist
     df = _ensure_str_cols(df, ["company", "title", "clean_text", "source_url"])
 
-    # Normalize timestamps (UTC-aware); missing cols are fine
+    # Normalize timestamps using dateutil parser (handles timezone offsets properly)
     for col in ["published_at", "collected_at"]:
         if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce", utc=True)
+            df[col] = df[col].apply(_parse_datetime_to_utc)
 
     # Unified reference date for downstream use
-    df["date_ref"] = pd.to_datetime(
-        df.get("published_at").where(df.get("published_at").notna(), df.get("collected_at")),
-        errors="coerce",
-        utc=True
-    )
+    df["date_ref"] = df["published_at"].where(df["published_at"].notna(), df["collected_at"])
 
     return df
 
@@ -55,17 +70,13 @@ def load_enriched_existing() -> pd.DataFrame:
     try:
         df = pd.read_csv(ENRICHED_PATH)
 
-        # Normalize timestamps if present
+        # Normalize timestamps using dateutil parser (handles timezone offsets properly)
         for col in ["published_at", "collected_at"]:
             if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors="coerce", utc=True)
+                df[col] = df[col].apply(_parse_datetime_to_utc)
 
         if "date_ref" not in df.columns:
-            df["date_ref"] = pd.to_datetime(
-                df.get("published_at").where(df.get("published_at").notna(), df.get("collected_at")),
-                errors="coerce",
-                utc=True
-            )
+            df["date_ref"] = df["published_at"].where(df["published_at"].notna(), df["collected_at"])
 
         # Ensure join keys + enrichment cols
         df = _ensure_str_cols(df, ["company", "source_url", "summary", "category", "impact"])
@@ -146,14 +157,17 @@ def enrich_missing(df: pd.DataFrame) -> pd.DataFrame:
     enriched_df = pd.DataFrame(rows)
 
     key_cols = ["company", "source_url"]
+    enrich_only_cols = ["summary", "category", "impact"]
+
     for k in key_cols:
         if k not in df.columns:
             df[k] = ""
         if k not in enriched_df.columns:
             enriched_df[k] = ""
 
+    # Only update enrichment columns, preserve everything else (including dates)
     df = df.set_index(key_cols)
-    enriched_df = enriched_df.set_index(key_cols)
+    enriched_df = enriched_df.set_index(key_cols)[enrich_only_cols]
     df.update(enriched_df)
     df = df.reset_index()
 

@@ -1,39 +1,40 @@
 # jobs/process_emails.py
 """
-Process received newsletter emails and add them to updates.csv.
+Batch process received newsletter emails through the full pipeline.
 
 This job:
 1. Reads email JSON files from data/emails/
-2. Extracts content and matches to competitors
-3. Adds new entries to updates.csv (same format as crawled articles)
-4. Moves processed emails to data/emails/processed/
+2. Runs each through the 4-stage pipeline:
+   - RECEIVED: Log to emails.csv
+   - MATCHED: AI matches to competitor
+   - QUALIFIED: AI quality gate (accept/reject)
+   - INJECTED: Add to updates.csv
+3. Moves processed emails to data/emails/processed/
 
 Run with: python -m jobs.process_emails
 """
 
-import csv
-import hashlib
 import json
-import os
-import re
 import shutil
+import time
 from datetime import datetime, UTC
 from pathlib import Path
-from typing import Any, Dict, Optional
-from html.parser import HTMLParser
+from typing import Dict, Optional
+import csv
 
-import yaml
 import pandas as pd
-
-import time
 
 from app.logger import (
     get_system_logger,
     log_user_action,
-    log_email_processing_start,
-    log_email_processed,
-    log_email_skipped,
-    log_email_processing_complete,
+)
+from app.email_matcher import (
+    match_email_to_competitor,
+    check_email_quality,
+    record_email_received,
+    record_email_matched,
+    record_email_injected,
+    email_exists,
 )
 
 logger = get_system_logger("process_emails")
@@ -41,72 +42,53 @@ logger = get_system_logger("process_emails")
 # Paths
 EMAILS_DIR = Path("data/emails")
 PROCESSED_DIR = EMAILS_DIR / "processed"
-CONFIG_PATH = Path("config/monitors.yaml")
 DATA_PATH = Path("data/updates.csv")
 
-COLUMNS = [
-    "id",
-    "company",
-    "source_url",
-    "title",
-    "published_at",
-    "collected_at",
-    "clean_text",
-]
+COLUMNS = ["id", "company", "source_url", "title", "published_at", "collected_at", "clean_text"]
 
 
-class HTMLTextExtractor(HTMLParser):
-    """Extract plain text from HTML content."""
+def extract_plain_text(payload: Dict) -> str:
+    """Extract plain text from email payload."""
+    import re
+    from html.parser import HTMLParser
 
-    def __init__(self):
-        super().__init__()
-        self.text_parts = []
-        self.skip_tags = {"script", "style", "head", "meta", "link"}
-        self.current_skip = False
+    plain = payload.get("plain", "") or ""
+    if plain.strip():
+        return re.sub(r"\s+", " ", plain).strip()
 
-    def handle_starttag(self, tag, attrs):
-        if tag.lower() in self.skip_tags:
-            self.current_skip = True
+    # Fallback to HTML stripping
+    html = payload.get("html", "") or ""
+    if html:
+        class TextExtractor(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.text_parts = []
 
-    def handle_endtag(self, tag):
-        if tag.lower() in self.skip_tags:
-            self.current_skip = False
+            def handle_data(self, data):
+                self.text_parts.append(data.strip())
 
-    def handle_data(self, data):
-        if not self.current_skip:
-            text = data.strip()
-            if text:
-                self.text_parts.append(text)
+            def get_text(self):
+                return " ".join(self.text_parts)
 
-    def get_text(self) -> str:
-        return " ".join(self.text_parts)
+        try:
+            parser = TextExtractor()
+            parser.feed(html)
+            return re.sub(r"\s+", " ", parser.get_text()).strip()
+        except Exception:
+            pass
 
-
-def html_to_text(html: str) -> str:
-    """Convert HTML to plain text."""
-    if not html:
-        return ""
-    try:
-        parser = HTMLTextExtractor()
-        parser.feed(html)
-        return parser.get_text()
-    except Exception:
-        # Fallback: strip tags with regex
-        text = re.sub(r"<[^>]+>", " ", html)
-        return re.sub(r"\s+", " ", text).strip()
+    return ""
 
 
-def load_config() -> Dict[str, Any]:
-    """Load configuration from YAML file."""
-    if not CONFIG_PATH.exists():
-        return {"competitors": []}
-
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {"competitors": []}
+def make_id(company: str, message_id: str) -> str:
+    """Generate deterministic ID for an email."""
+    import hashlib
+    base = f"{company}||email||{message_id}"
+    return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 
 def load_existing_ids() -> set:
-    """Load existing IDs from updates.csv to avoid duplicates."""
+    """Load existing IDs from updates.csv."""
     if not DATA_PATH.exists():
         return set()
     try:
@@ -119,83 +101,38 @@ def load_existing_ids() -> set:
 
 
 def ensure_csv_headers():
-    """Ensure updates.csv exists with proper headers."""
+    """Ensure updates.csv exists with headers."""
     DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not DATA_PATH.exists():
         with open(DATA_PATH, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(COLUMNS)
 
 
-def make_id(company: str, message_id: str) -> str:
-    """Generate deterministic ID for an email."""
-    base = f"{company}||email||{message_id}"
-    return hashlib.sha256(base.encode("utf-8")).hexdigest()
-
-
-def match_competitor(from_addr: str, subject: str, config: Dict) -> Optional[str]:
+def process_single_email(filepath: Path, existing_ids: set) -> Optional[Dict]:
     """
-    Try to match an email to a competitor based on sender or subject.
+    Process a single email through the full pipeline.
 
-    Returns the competitor name if matched, None otherwise.
+    Returns row dict if injected, None otherwise.
     """
-    competitors = config.get("competitors", [])
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to read {filepath}: {e}")
+        return None
 
-    from_lower = from_addr.lower()
-    subject_lower = subject.lower()
-
-    for comp in competitors:
-        name = comp.get("name", "")
-        if not name:
-            continue
-
-        # Extract keywords from competitor name
-        keywords = name.lower().replace("(", " ").replace(")", " ").split()
-
-        # Check if any keyword appears in from address or subject
-        for keyword in keywords:
-            if len(keyword) > 2:  # Skip short words
-                if keyword in from_lower or keyword in subject_lower:
-                    return name
-
-        # Also check start_urls domains
-        for url in comp.get("start_urls", []):
-            # Extract domain from URL
-            domain_match = re.search(r"https?://(?:www\.)?([^/]+)", url)
-            if domain_match:
-                domain = domain_match.group(1).lower()
-                domain_name = domain.split(".")[0]
-                if domain_name in from_lower:
-                    return name
-
-    return None
-
-
-def extract_email_content(payload: Dict) -> Dict[str, Any]:
-    """Extract relevant content from CloudMailin email payload."""
     headers = payload.get("headers", {})
     envelope = payload.get("envelope", {})
 
-    # Get subject (try various header formats)
-    subject = (
-        headers.get("subject") or
-        headers.get("Subject") or
-        "(No Subject)"
-    )
-
-    # Get from address
-    from_addr = envelope.get("from", "")
-    if not from_addr:
-        from_addr = headers.get("from") or headers.get("From") or "unknown"
-
-    # Get message ID for deduplication
+    # Extract fields
+    subject = headers.get("subject") or headers.get("Subject") or "(No Subject)"
+    from_addr = envelope.get("from", "") or headers.get("from") or headers.get("From") or "unknown"
+    to_addr = envelope.get("to", "") or headers.get("to") or headers.get("To") or "unknown"
     message_id = (
-        headers.get("message_id") or
-        headers.get("Message-ID") or
-        headers.get("Message-Id") or
-        payload.get("_webhook_metadata", {}).get("received_at", "")
+        headers.get("message_id") or headers.get("Message-ID") or headers.get("Message-Id") or
+        payload.get("_webhook_metadata", {}).get("received_at", filepath.stem)
     )
 
-    # Get date
     date_str = headers.get("date") or headers.get("Date") or ""
     published_at = None
     if date_str:
@@ -205,162 +142,129 @@ def extract_email_content(payload: Dict) -> Dict[str, Any]:
         except Exception:
             pass
 
-    # Get body content - prefer plain text, fall back to HTML
-    plain_text = payload.get("plain", "") or ""
-    html_content = payload.get("html", "") or ""
+    body = extract_plain_text(payload)
 
-    if plain_text.strip():
-        body = plain_text
-    elif html_content.strip():
-        body = html_to_text(html_content)
-    else:
-        body = ""
-
-    # Clean up body text
-    body = re.sub(r"\s+", " ", body).strip()
-
-    return {
-        "subject": subject,
-        "from": from_addr,
-        "message_id": message_id,
-        "published_at": published_at,
-        "body": body,
-    }
-
-
-def process_email_file(filepath: Path, config: Dict, existing_ids: set) -> Optional[Dict]:
-    """
-    Process a single email JSON file.
-
-    Returns a row dict for updates.csv, or None if should be skipped.
-    """
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to read {filepath}: {e}")
+    # Check if already processed
+    if email_exists(filepath.name):
+        logger.debug(f"Already processed: {filepath.name}")
         return None
 
-    # Extract content
-    content = extract_email_content(payload)
+    # STAGE 1: Record received
+    record_email_received(
+        json_file=filepath.name,
+        from_address=from_addr,
+        to_address=to_addr,
+        date=date_str,
+        subject=subject,
+    )
+    logger.info(f"[RECEIVED] {subject[:50]}")
 
-    # Try to match to a competitor
-    company = match_competitor(content["from"], content["subject"], config)
-
+    # STAGE 2: AI matching
+    company = match_email_to_competitor(from_addr, subject, body)
     if not company:
-        # If no competitor match, use a generic label
-        company = "Newsletter (Unmatched)"
+        logger.info(f"[NO MATCH] {subject[:50]} - no competitor matched")
+        return None
 
-    # Generate ID
-    row_id = make_id(company, content["message_id"])
+    record_email_matched(filepath.name, from_addr, company)
+    logger.info(f"[MATCHED] {subject[:50]} -> {company}")
+
+    # STAGE 3: Quality gate
+    if not check_email_quality(from_addr, subject, body):
+        logger.info(f"[REJECTED] {subject[:50]} - failed quality gate")
+        return None
+
+    logger.info(f"[QUALIFIED] {subject[:50]} - passed quality gate")
 
     # Check for duplicates
+    row_id = make_id(company, message_id)
     if row_id in existing_ids:
-        logger.debug(f"Skipping duplicate email: {content['subject']}")
+        logger.debug(f"[DUPLICATE] {subject[:50]}")
         return None
 
-    # Create source URL from message ID or filename
-    source_url = f"email://{filepath.stem}"
-
-    return {
+    # STAGE 4: Inject
+    row = {
         "id": row_id,
         "company": company,
-        "source_url": source_url,
-        "title": content["subject"],
-        "published_at": content["published_at"] or "",
+        "source_url": f"email://{filepath.stem}",
+        "title": subject,
+        "published_at": published_at or "",
         "collected_at": datetime.now(UTC).isoformat(),
-        "clean_text": content["body"],
-        "filename": filepath.name,  # For tracking which file was processed
+        "clean_text": body,
     }
+
+    record_email_injected(filepath.name, from_addr)
+    logger.info(f"[INJECTED] {subject[:50]} -> updates.csv")
+
+    return row
 
 
 def main():
     """Process all unprocessed email files."""
     start_time = time.time()
 
-    # Ensure directories exist
     EMAILS_DIR.mkdir(parents=True, exist_ok=True)
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     ensure_csv_headers()
 
-    # Load config and existing IDs
-    config = load_config()
     existing_ids = load_existing_ids()
-
-    # Find email files to process
     email_files = list(EMAILS_DIR.glob("*.json"))
 
     if not email_files:
-        logger.info("No email files to process")
         print("No email files to process.")
         return
 
-    # Log start with standard format
-    log_email_processing_start(len(email_files))
+    print(f"\nProcessing {len(email_files)} email(s)...\n")
 
-    new_rows = []
+    injected_rows = []
     processed_files = []
-    skipped_count = 0
 
     for filepath in email_files:
-        result = process_email_file(filepath, config, existing_ids)
+        print(f"--- {filepath.name} ---")
+        row = process_single_email(filepath, existing_ids)
 
-        if result:
-            filename = result.pop("filename")  # Remove filename from row
-            new_rows.append(result)
-            processed_files.append((filepath, filename))
-            existing_ids.add(result["id"])  # Prevent duplicates within run
+        if row:
+            injected_rows.append(row)
+            existing_ids.add(row["id"])
 
-            log_email_processed(filename, result['company'], result['title'])
-        else:
-            # Move unmatched/duplicate to processed anyway
-            processed_files.append((filepath, filepath.name))
-            log_email_skipped(filepath.name, "duplicate or parse error")
-            skipped_count += 1
+        processed_files.append(filepath)
 
-    # Append new rows to CSV
-    if new_rows:
+    # Write injected rows to CSV
+    if injected_rows:
         with open(DATA_PATH, "a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=COLUMNS)
-            for row in new_rows:
+            for row in injected_rows:
                 writer.writerow(row)
 
-        logger.info(f"Added {len(new_rows)} newsletter articles to {DATA_PATH}")
-
-        # Update parquet mirror
+        # Update parquet
         try:
             df = pd.read_csv(DATA_PATH)
             df.to_parquet("data/updates.parquet", index=False)
-            logger.debug("Parquet mirror updated")
         except Exception as e:
             logger.warning(f"Failed to update parquet: {e}")
 
-    # Move processed files
-    for filepath, filename in processed_files:
+    # Move all processed files
+    for filepath in processed_files:
         try:
-            dest = PROCESSED_DIR / filename
+            dest = PROCESSED_DIR / filepath.name
             shutil.move(str(filepath), str(dest))
-            logger.debug(f"Moved {filename} to processed/")
         except Exception as e:
-            logger.warning(f"Failed to move {filename}: {e}")
+            logger.warning(f"Failed to move {filepath.name}: {e}")
 
-    # Calculate duration and log completion
     duration = time.time() - start_time
-    log_email_processing_complete(len(processed_files), len(new_rows), duration)
 
-    # Summary
-    print(f"\nEmail Processing Complete")
+    print(f"\n{'='*50}")
+    print(f"Processing Complete")
     print(f"  Files processed: {len(processed_files)}")
-    print(f"  New articles added: {len(new_rows)}")
-    print(f"  Skipped: {skipped_count}")
+    print(f"  Injected to pipeline: {len(injected_rows)}")
     print(f"  Duration: {duration:.1f}s")
+    print(f"{'='*50}")
 
-    if new_rows:
-        print("\nNewly added articles:")
-        for row in new_rows:
+    if injected_rows:
+        print("\nInjected articles:")
+        for row in injected_rows:
             print(f"  [{row['company']}] {row['title'][:60]}")
 
-    log_user_action("process_emails", "completed", f"Processed {len(processed_files)} files, added {len(new_rows)} articles")
+    log_user_action("process_emails", "batch_complete", f"{len(processed_files)} processed, {len(injected_rows)} injected")
 
 
 if __name__ == "__main__":

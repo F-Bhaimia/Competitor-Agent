@@ -5,13 +5,17 @@ import subprocess
 import signal
 import time
 from html import escape
+from pathlib import Path
 import re
 from collections import Counter
 from io import BytesIO
+from typing import Dict
 
 import pandas as pd
 import streamlit as st
+import yaml
 from openai import OpenAI
+from dateutil import parser as dateparser
 
 from app.logger import (
     get_system_logger,
@@ -19,6 +23,13 @@ from app.logger import (
     log_user_action,
     init_client_ip,
     get_client_ip,
+)
+from app.email_matcher import (
+    get_all_senders,
+    load_emails_df,
+    set_sender_assigned_company,
+    get_competitor_names,
+    rebuild_sender_stats,
 )
 
 # Initialize logging
@@ -314,16 +325,32 @@ if st.button("Reload Data", key="reload_button"):
     st.rerun()
 
 # --------------------------- Helpers ---------------------------
+def _parse_datetime_to_utc(value):
+    """Parse a datetime string to UTC-aware datetime, handling various formats."""
+    if pd.isna(value) or str(value).strip() in ("", "nan", "NaN", "None", "NaT"):
+        return pd.NaT
+    try:
+        dt = dateparser.parse(str(value))
+        if dt is None:
+            return pd.NaT
+        if dt.tzinfo is not None:
+            return dt.astimezone(pd.Timestamp.now('UTC').tzinfo)
+        else:
+            return dt.replace(tzinfo=pd.Timestamp.now('UTC').tzinfo)
+    except Exception:
+        return pd.NaT
+
+
 @st.cache_data(show_spinner=False)
 def load_data():
     """Load enriched if present, else raw; normalize timestamps and required cols."""
     path = DATA_ENRICHED if os.path.exists(DATA_ENRICHED) else DATA_RAW
     df = pd.read_csv(path)
 
-    # Normalize datetimes as UTC-aware
+    # Normalize datetimes using dateutil parser (handles timezone offsets properly)
     for col in ["published_at", "collected_at"]:
         if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce", utc=True)
+            df[col] = df[col].apply(_parse_datetime_to_utc)
 
     # Ensure required columns exist
     for col, default in [
@@ -338,13 +365,9 @@ def load_data():
 
     # Unified reference date: prefer published_at, fallback to collected_at
     pub = df.get("published_at")
-    col = df.get("collected_at")
-    if pub is not None or col is not None:
-        df["date_ref"] = pd.to_datetime(
-            (pub.where(pub.notna(), col) if pub is not None else col),
-            errors="coerce",
-            utc=True,
-        )
+    coll = df.get("collected_at")
+    if pub is not None or coll is not None:
+        df["date_ref"] = pub.where(pub.notna(), coll) if pub is not None else coll
     else:
         df["date_ref"] = pd.NaT
 
@@ -361,10 +384,30 @@ def impact_badge(val):
     return f'<span style="background:{color};color:white;padding:2px 8px;border-radius:12px;font-size:12px;">{txt}</span>'
 
 def clickable_title(title: str, url: str) -> str:
+    from urllib.parse import quote
+
     t = escape((title or "").strip() or "View")
     u = (url or "").strip()
     if not u:
         return t
+
+    # For email entries, link to the webhook email viewer
+    if u.startswith("email://"):
+        email_id = u.replace("email://", "")
+        # URL-encode the email ID to handle special characters like = and +
+        email_id_encoded = quote(email_id, safe="")
+        # Get webhook port from config
+        config_path = Path("config/monitors.yaml")
+        webhook_port = 8001
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+                    webhook_port = cfg.get("global", {}).get("webhook_port", 8001)
+            except Exception:
+                pass
+        u = f"http://localhost:{webhook_port}/email/view/{email_id_encoded}"
+
     return f'<a href="{escape(u)}" target="_blank" rel="noopener">{t}</a>'
 
 def _condense_words(text: str, max_words: int = 28) -> str:
@@ -380,23 +423,42 @@ def _condense_words(text: str, max_words: int = 28) -> str:
 # OpenAI client for summaries
 client = OpenAI()
 
+def _get_summarize_prompts() -> Dict[str, str]:
+    """Get summarize_point prompts from config."""
+    import yaml
+    config_path = "config/monitors.yaml"
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f) or {}
+            prompts = config.get("prompts", {}).get("summarize_point", {})
+            if prompts:
+                return prompts
+    except Exception:
+        pass
+    # Defaults
+    return {
+        "system": "You are a professional business summarizer.",
+        "user": "Summarize the following news or blog content in a single concise paragraph of about {max_words} words. Make it clear, factual, and self-contained:\n\n{text}"
+    }
+
 def summarize_point(text: str, max_words: int = 50) -> str:
     """Uses GPT to generate a clean 1–2 sentence summary (~50 words)."""
     text = (text or "").strip()
     if not text:
         return ""
-    prompt = (
-        f"Summarize the following news or blog content in a single concise paragraph "
-        f"of about {max_words} words. Make it clear, factual, and self-contained:\n\n{text}"
-    )
+
+    prompts = _get_summarize_prompts()
+    user_prompt = prompts["user"].format(max_words=max_words, text=text)
+
     try:
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
             temperature=0.3,
             max_tokens=120,
             messages=[
-                {"role": "system", "content": "You are a professional business summarizer."},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": prompts["system"]},
+                {"role": "user", "content": user_prompt},
             ],
         )
         return resp.choices[0].message.content.strip()
@@ -696,7 +758,7 @@ if st.session_state.show_settings:
     st.divider()
 
     # Create tabs for the settings sections
-    settings_tab1, settings_tab2, settings_tab3 = st.tabs(["⚙️ Configuration", "🏷️ Categories", "🔧 Data Quality Tools"])
+    settings_tab1, settings_tab2, settings_tab3, settings_tab4 = st.tabs(["⚙️ Configuration", "🏷️ Categories", "📧 Emails", "🔧 Data Quality Tools"])
 
     # ===================== CONFIGURATION TAB =====================
     with settings_tab1:
@@ -1109,8 +1171,130 @@ if st.session_state.show_settings:
                     del st.session_state.config_categories
                 st.rerun()
 
-    # ===================== DATA QUALITY TOOLS TAB =====================
+    # ===================== EMAILS TAB =====================
     with settings_tab3:
+        st.subheader("Email Senders")
+        st.write("View email senders and their matched competitors. Emails are received via CloudMailin webhook.")
+
+        # Load data from email_matcher module
+        senders_df = get_all_senders()
+        emails_df = load_emails_df()
+
+        if senders_df.empty and emails_df.empty:
+            st.info("No emails received yet. Configure CloudMailin to send emails to your webhook endpoint.")
+        else:
+            # Show summary metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                total_received = int(senders_df["emails_received"].sum()) if not senders_df.empty else 0
+                st.metric("Total Received", total_received)
+            with col2:
+                total_processed = int(senders_df["emails_processed"].sum()) if not senders_df.empty else 0
+                st.metric("Total Processed", total_processed)
+            with col3:
+                total_injected = int(senders_df["emails_injected"].sum()) if not senders_df.empty else 0
+                st.metric("Total Injected", total_injected)
+            with col4:
+                unique_senders = len(senders_df)
+                st.metric("Unique Senders", unique_senders)
+
+            st.divider()
+
+            # Sender statistics table with assignment capability
+            st.subheader("Sender Statistics")
+            st.caption("Assign a company to auto-match future emails from that sender.")
+
+            if not senders_df.empty:
+                # Get competitor names for dropdown
+                competitor_options = ["(unassigned)"] + get_competitor_names()
+
+                # Column headers
+                header_cols = st.columns([3, 1, 1, 1, 2, 1])
+                header_cols[0].markdown("**Email Address**")
+                header_cols[1].markdown("**Received**")
+                header_cols[2].markdown("**Processed**")
+                header_cols[3].markdown("**Injected**")
+                header_cols[4].markdown("**Assign To**")
+                header_cols[5].markdown("")
+                st.divider()
+
+                # Create editable view
+                for idx, row in senders_df.iterrows():
+                    with st.container():
+                        cols = st.columns([3, 1, 1, 1, 2, 1])
+
+                        # Email address
+                        cols[0].text(row["from_address"])
+
+                        # Stats
+                        cols[1].text(str(int(row.get("emails_received", 0) or 0)))
+                        cols[2].text(str(int(row.get("emails_processed", 0) or 0)))
+                        cols[3].text(str(int(row.get("emails_injected", 0) or 0)))
+
+                        # Assignment dropdown
+                        current_assignment = row.get("assigned_company", "") or ""
+                        if current_assignment and current_assignment in competitor_options:
+                            default_idx = competitor_options.index(current_assignment)
+                        else:
+                            default_idx = 0
+
+                        new_assignment = cols[4].selectbox(
+                            "Assign to",
+                            options=competitor_options,
+                            index=default_idx,
+                            key=f"sender_assign_{idx}",
+                            label_visibility="collapsed",
+                        )
+
+                        # Save button
+                        if cols[5].button("Save", key=f"sender_save_{idx}"):
+                            company_to_save = "" if new_assignment == "(unassigned)" else new_assignment
+                            set_sender_assigned_company(row["from_address"], company_to_save)
+                            log_user_action("admin", "sender_assigned", f"{row['from_address']} -> {company_to_save or 'unassigned'}")
+                            st.success(f"Saved: {row['from_address']} -> {new_assignment}")
+                            st.rerun()
+
+                        st.divider()
+
+                # Summary table view
+                with st.expander("View as Table"):
+                    display_df = senders_df[["from_address", "emails_received", "emails_processed", "emails_injected", "assigned_company", "last_seen"]].copy()
+                    display_df.columns = ["Email Address", "# Received", "# Processed", "# Injected", "Assigned Company", "Last Seen"]
+
+                    def highlight_unassigned(val):
+                        if not val or str(val).lower() == "nan" or val == "":
+                            return "background-color: #fff3cd"
+                        return ""
+
+                    styled_df = display_df.style.applymap(highlight_unassigned, subset=["Assigned Company"])
+                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
+            st.divider()
+
+            # Recent emails table
+            st.subheader("Recent Emails")
+            if not emails_df.empty:
+                recent = emails_df.sort_values("received_at", ascending=False).head(20)
+                display_cols = ["json_file", "from_address", "subject", "matched_company", "injected", "received_at"]
+                display_cols = [c for c in display_cols if c in recent.columns]
+                recent_display = recent[display_cols].copy()
+                recent_display.columns = ["File", "From", "Subject", "Matched Company", "Injected", "Received"]
+                st.dataframe(recent_display, use_container_width=True, hide_index=True)
+            else:
+                st.info("No emails in log yet.")
+
+            # Utility: Rebuild sender stats
+            st.divider()
+            with st.expander("Maintenance Tools"):
+                st.caption("Use these tools to fix data inconsistencies.")
+                if st.button("Rebuild Sender Stats", help="Recalculate sender statistics from emails.csv"):
+                    rebuild_sender_stats()
+                    log_user_action("admin", "rebuild_sender_stats", "Manual rebuild triggered")
+                    st.success("Sender statistics rebuilt from emails.csv")
+                    st.rerun()
+
+    # ===================== DATA QUALITY TOOLS TAB =====================
+    with settings_tab4:
         st.subheader("Enrichment")
         st.write("Run AI enrichment to add summaries, categories, and impact ratings to crawled articles.")
 
@@ -1414,6 +1598,29 @@ if menu == "Posts by Competitor":
 
     if "category" in display.columns:
         display["category"] = display["category"].apply(lambda s: s if str(s).strip() else "Uncategorized")
+
+    # Transform email:// URLs to actual HTTP links for the email viewer
+    if "source_url" in display.columns:
+        from urllib.parse import quote
+        config_path = Path("config/monitors.yaml")
+        webhook_port = 8001
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as cfg_file:
+                    cfg = yaml.safe_load(cfg_file) or {}
+                    webhook_port = cfg.get("global", {}).get("webhook_port", 8001)
+            except Exception:
+                pass
+
+        def transform_email_url(url):
+            url = str(url).strip()
+            if url.startswith("email://"):
+                email_id = url.replace("email://", "")
+                email_id_encoded = quote(email_id, safe="")
+                return f"http://localhost:{webhook_port}/email/view/{email_id_encoded}"
+            return url
+
+        display["source_url"] = display["source_url"].apply(transform_email_url)
 
     # Reorder and prepare columns for display
     ui_cols = [c for c in ["date_ref", "company", "title", "category", "impact", "summary", "source_url"] if c in display.columns]

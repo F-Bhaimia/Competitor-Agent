@@ -19,6 +19,7 @@ from app.logger import (
     log_scan_complete,
     log_scan_error,
 )
+from jobs.enrich_updates import main as run_enrichment
 
 logger = get_system_logger(__name__)
 
@@ -202,6 +203,16 @@ def main():
     else:
         logger.info("Run Summary: (no data yet)")
         print("\nRun Summary\n  (no data yet)")
+
+    # ---- Auto-enrich new entries ----
+    if new_rows:
+        logger.info("Running auto-enrichment for new entries...")
+        print("\nRunning enrichment...")
+        try:
+            run_enrichment()
+            logger.info("Auto-enrichment complete.")
+        except Exception as e:
+            logger.warning(f"Auto-enrichment failed: {e}")
 
 # --- keep this at the very end of the file ---
 if __name__ == "__main__":

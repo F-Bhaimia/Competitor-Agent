@@ -46,6 +46,87 @@ classification:
 
   # Industry context for the AI prompt
   industry_context: "membership/club management software"
+
+# AI Prompts - All OpenAI prompts centralized here
+prompts:
+  # Email matching: Determines which competitor sent an email
+  email_match:
+    system: "You match emails to companies. Respond only with a company name or NONE."
+    user: |
+      You are analyzing a newsletter email to determine which company sent it.
+
+      CONFIGURED COMPETITORS:
+      {competitors_list}
+
+      EMAIL DETAILS:
+      From: {from_address}
+      Subject: {subject}
+      Body preview (first 500 chars): {body_preview}
+
+      TASK:
+      Determine if this email is FROM one of the configured competitors above.
+      Look at the sender email domain, the subject line, and body content for clues.
+
+      RESPOND WITH ONLY:
+      - The exact competitor name from the list above if it matches
+      - "NONE" if it doesn't match any competitor
+
+      Do not explain, just respond with the competitor name or "NONE".
+
+  # Email quality gate: Determines if email is worth injecting into pipeline
+  email_quality:
+    system: "You filter emails for a competitive intelligence system. Respond only with ACCEPT or REJECT."
+    user: |
+      You are filtering emails for a competitive intelligence system.
+
+      EMAIL:
+      From: {from_address}
+      Subject: {subject}
+      Body preview: {body_preview}
+
+      ACCEPT emails that are:
+      - Official newsletters, product announcements, or marketing emails from companies
+      - Content about features, pricing, partnerships, events, case studies, company news
+      - Sent from company domains or marketing platforms (HubSpot, Mailchimp, Marketo, etc.)
+      - Forwarded newsletters that contain the original company content
+
+      REJECT emails that are:
+      - Test emails, personal messages, or casual forwards without substance
+      - Transactional emails (receipts, password resets, confirmations)
+      - Spam, irrelevant content, or emails with no business intelligence value
+      - Emails where the subject contains "test" and body is minimal
+
+      RESPOND WITH ONLY: "ACCEPT" or "REJECT"
+
+  # Article classification: Categorizes and summarizes competitor content
+  classify_article:
+    system: |
+      You are a precise analyst. Given a competitor blog/news post, return:
+      - 'summary': 40-80 words, plain text.
+      - 'category': one of {categories}.
+      - 'impact': High, Medium, or Low for a {industry} competitor.
+      Impact guidance:
+      High = {high_rules}.
+      Medium = {medium_rules}.
+      Low = {low_rules}.
+      Return ONLY valid JSON with keys: summary, category, impact.
+    user: |
+      Company: {company}
+      Title: {title}
+
+      Body:
+      {body}
+
+      Respond in JSON.
+
+  # Executive summary: Summarizes individual bullet points
+  summarize_point:
+    system: "You are a professional business summarizer."
+    user: |
+      Summarize the following news or blog content in a single concise paragraph of about {max_words} words. Make it clear, factual, and self-contained:
+
+      {text}
+
 competitors:
 - name: Kicksite
   start_urls:

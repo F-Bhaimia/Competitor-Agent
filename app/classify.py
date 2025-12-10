@@ -62,6 +62,18 @@ def get_industry_context() -> str:
     return config.get("industry_context", DEFAULT_INDUSTRY)
 
 
+def _get_prompts() -> Dict[str, Any]:
+    """Get prompts from config."""
+    try:
+        if CONFIG_PATH.exists():
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f) or {}
+            return config.get("prompts", {})
+    except Exception:
+        pass
+    return {}
+
+
 def _build_system_prompt() -> str:
     """Build the system prompt from configuration."""
     categories = get_categories()
@@ -72,6 +84,21 @@ def _build_system_prompt() -> str:
     medium_rules = ", ".join(impact_rules.get("medium", []))
     low_rules = ", ".join(impact_rules.get("low", []))
 
+    # Try to get from config first
+    prompts = _get_prompts()
+    classify_prompts = prompts.get("classify_article", {})
+
+    if classify_prompts.get("system"):
+        # Use config prompt with variable substitution
+        return classify_prompts["system"].format(
+            categories=", ".join([repr(c) for c in categories]),
+            industry=industry,
+            high_rules=high_rules,
+            medium_rules=medium_rules,
+            low_rules=low_rules
+        )
+
+    # Fallback to hardcoded
     return (
         "You are a precise analyst. Given a competitor blog/news post, return:\n"
         "- 'summary': 40–80 words, plain text.\n"
@@ -82,6 +109,27 @@ def _build_system_prompt() -> str:
         f"Medium = {medium_rules}.\n"
         f"Low = {low_rules}.\n"
         "Return ONLY valid JSON with keys: summary, category, impact."
+    )
+
+
+def _build_user_prompt(company: str, title: str, body: str) -> str:
+    """Build the user prompt from configuration."""
+    prompts = _get_prompts()
+    classify_prompts = prompts.get("classify_article", {})
+
+    if classify_prompts.get("user"):
+        return classify_prompts["user"].format(
+            company=company or "Unknown",
+            title=title,
+            body=body
+        )
+
+    # Fallback
+    return (
+        f"Company: {company or 'Unknown'}\n"
+        f"Title: {title}\n\n"
+        f"Body:\n{body}\n\n"
+        "Respond in JSON."
     )
 
 
@@ -109,13 +157,7 @@ def classify_article(company: str, title: str, body: str) -> Dict[str, Any]:
     if not body and not title:
         return {"summary": "", "category": "Other", "impact": "Low"}
 
-    prompt = (
-        f"Company: {company or 'Unknown'}\n"
-        f"Title: {title}\n\n"
-        f"Body:\n{body}\n\n"
-        "Respond in JSON."
-    )
-
+    prompt = _build_user_prompt(company, title, body)
     categories = get_categories()
     system_prompt = _build_system_prompt()
 
