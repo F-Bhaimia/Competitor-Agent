@@ -7,23 +7,26 @@ echo   Competitor Analysis Dashboard Launcher
 echo ============================================
 echo.
 
-:: Kill any existing processes
+:: Kill any existing processes on our ports
 echo Stopping any running services...
-taskkill /F /IM "streamlit.exe" >nul 2>&1
-taskkill /F /FI "WINDOWTITLE eq streamlit*" >nul 2>&1
 
-:: Kill Python processes running streamlit
-for /f "tokens=2" %%i in ('wmic process where "commandline like '%%streamlit%%'" get processid 2^>nul ^| findstr /r "[0-9]"') do (
-    taskkill /F /PID %%i >nul 2>&1
+:: Kill process on port 8501 (dashboard)
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8501 ^| findstr LISTENING') do (
+    echo Killing dashboard process %%a
+    taskkill /F /PID %%a >nul 2>&1
 )
 
-:: Kill Python processes running webhook_server
-for /f "tokens=2" %%i in ('wmic process where "commandline like '%%webhook_server%%'" get processid 2^>nul ^| findstr /r "[0-9]"') do (
-    taskkill /F /PID %%i >nul 2>&1
+:: Kill process on port 8001 (webhook)
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8001 ^| findstr LISTENING') do (
+    echo Killing webhook process %%a
+    taskkill /F /PID %%a >nul 2>&1
 )
 
 :: Brief pause to ensure ports are released
 timeout /t 2 /nobreak >nul
+
+:: Ensure logs directory exists
+if not exist logs mkdir logs
 
 echo.
 echo Starting services...
@@ -34,7 +37,7 @@ echo Starting webhook server on port 8001...
 start /b python -m app.webhook_server > logs\webhook.log 2>&1
 
 :: Brief pause for webhook to start
-timeout /t 1 /nobreak >nul
+timeout /t 2 /nobreak >nul
 
 echo Starting dashboard on port 8501...
 echo.
@@ -52,8 +55,8 @@ python -m streamlit run streamlit_app/Home.py --server.port 8501
 :: If we get here, Streamlit was stopped - also stop webhook
 echo.
 echo Stopping webhook server...
-for /f "tokens=2" %%i in ('wmic process where "commandline like '%%webhook_server%%'" get processid 2^>nul ^| findstr /r "[0-9]"') do (
-    taskkill /F /PID %%i >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8001 ^| findstr LISTENING') do (
+    taskkill /F /PID %%a >nul 2>&1
 )
 
 echo.
