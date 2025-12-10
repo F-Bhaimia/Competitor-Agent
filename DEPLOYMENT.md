@@ -104,7 +104,9 @@ python3 -m app.crawl
 ./scripts/run_pipeline.sh
 ```
 
-## Step 7: Set Up Systemd Service for Streamlit Dashboard
+## Step 7: Set Up Systemd Services
+
+### 7a. Dashboard Service
 
 ```bash
 # Create systemd service file
@@ -132,21 +134,55 @@ WantedBy=multi-user.target
 
 Save and exit (Ctrl+X, then Y, then Enter)
 
+### 7b. Webhook Server Service (for newsletter ingestion)
+
 ```bash
-# Reload systemd to recognize new service
+# Create webhook service file
+sudo nano /etc/systemd/system/competitor-webhook.service
+```
+
+Add the following content:
+```ini
+[Unit]
+Description=Competitor News Monitor Webhook Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/competitor-agent
+Environment="PATH=/opt/competitor-agent/.venv/bin"
+ExecStart=/opt/competitor-agent/.venv/bin/python -m app.webhook_server
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Save and exit (Ctrl+X, then Y, then Enter)
+
+### 7c. Enable and Start Services
+
+```bash
+# Reload systemd to recognize new services
 sudo systemctl daemon-reload
 
-# Enable service to start on boot
+# Enable services to start on boot
 sudo systemctl enable competitor-dashboard
+sudo systemctl enable competitor-webhook
 
-# Start the service
+# Start the services
 sudo systemctl start competitor-dashboard
+sudo systemctl start competitor-webhook
 
 # Check service status
 sudo systemctl status competitor-dashboard
+sudo systemctl status competitor-webhook
 
 # View logs if needed
 sudo journalctl -u competitor-dashboard -f
+sudo journalctl -u competitor-webhook -f
 ```
 
 ## Step 8: Configure Nginx Reverse Proxy
@@ -162,6 +198,17 @@ server {
     listen 80;
     server_name your-server-ip;  # Replace with your domain or IP
 
+    # Webhook endpoint for CloudMailin email ingestion
+    location /email {
+        proxy_pass http://localhost:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Dashboard
     location / {
         proxy_pass http://localhost:8501;
         proxy_http_version 1.1;
@@ -225,8 +272,12 @@ chmod +x /opt/competitor-agent/scripts/*.sh
 crontab -e
 ```
 
-Add the following line (runs daily at 2 AM server time):
+Add the following lines:
 ```cron
+# Process newsletter emails every hour
+0 * * * * cd /opt/competitor-agent && .venv/bin/python -m jobs.process_emails >> /opt/competitor-agent/logs/cron.log 2>&1
+
+# Run daily crawl at 2 AM server time
 0 2 * * * /opt/competitor-agent/scripts/update_daily.sh >> /opt/competitor-agent/logs/cron.log 2>&1
 ```
 
@@ -269,19 +320,25 @@ sudo certbot renew --dry-run
 
 ## Useful Management Commands
 
-### Check Dashboard Status
+### Check Service Status
 ```bash
 sudo systemctl status competitor-dashboard
+sudo systemctl status competitor-webhook
 ```
 
-### Restart Dashboard
+### Restart Services
 ```bash
 sudo systemctl restart competitor-dashboard
+sudo systemctl restart competitor-webhook
 ```
 
-### View Dashboard Logs
+### View Logs
 ```bash
+# Dashboard logs
 sudo journalctl -u competitor-dashboard -f
+
+# Webhook server logs
+sudo journalctl -u competitor-webhook -f
 ```
 
 ### View Cron Job Logs
