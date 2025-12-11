@@ -30,6 +30,8 @@ from app.email_matcher import (
     set_sender_assigned_company,
     get_competitor_names,
     rebuild_sender_stats,
+    delete_sender,
+    delete_email,
 )
 
 # Initialize logging
@@ -1240,6 +1242,36 @@ if st.session_state.show_settings:
                     st.success(f"Assigned: {selected_sender} → {selected_company}")
                     st.rerun()
 
+                # Delete unassigned senders section
+                st.markdown("**Delete Unassigned Sender**")
+                st.caption("Remove senders that have no company assigned. This only deletes the sender record, not the emails.")
+
+                # Filter to only unassigned senders
+                unassigned_senders = senders_df[
+                    (senders_df["assigned_company"].isna()) |
+                    (senders_df["assigned_company"].astype(str).str.strip() == "") |
+                    (senders_df["assigned_company"].astype(str).str.lower() == "nan")
+                ]["from_address"].tolist()
+
+                if unassigned_senders:
+                    del_col1, del_col2 = st.columns([4, 1])
+                    sender_to_delete = del_col1.selectbox(
+                        "Sender to delete",
+                        unassigned_senders,
+                        key="delete_sender_select",
+                        label_visibility="collapsed",
+                        placeholder="Select unassigned sender..."
+                    )
+                    if del_col2.button("Delete Sender", key="delete_sender_btn", type="secondary"):
+                        if delete_sender(sender_to_delete):
+                            log_user_action("admin", "sender_deleted", sender_to_delete)
+                            st.success(f"Deleted sender: {sender_to_delete}")
+                            st.rerun()
+                        else:
+                            st.error("Failed to delete sender")
+                else:
+                    st.info("No unassigned senders to delete.")
+
             st.divider()
 
             # Recent emails table
@@ -1247,7 +1279,13 @@ if st.session_state.show_settings:
             if not emails_df.empty:
                 from urllib.parse import quote
 
-                recent = emails_df.sort_values("received_at", ascending=False).head(20)
+                # Filter out deleted emails
+                if "status" in emails_df.columns:
+                    inbox_emails = emails_df[emails_df["status"] != "deleted"]
+                else:
+                    inbox_emails = emails_df
+
+                recent = inbox_emails.sort_values("received_at", ascending=False).head(20)
                 display_cols = ["json_file", "from_address", "subject", "matched_company", "injected", "received_at"]
                 display_cols = [c for c in display_cols if c in recent.columns]
                 recent_display = recent[display_cols].copy()
@@ -1273,7 +1311,10 @@ if st.session_state.show_settings:
                         return f"http://localhost:{webhook_port}/email/view/{email_id_encoded}"
 
                     recent_display["view_url"] = recent_display["json_file"].apply(make_email_view_url)
-                    # Reorder to put view_url first, drop json_file
+                    # Keep json_file for delete but don't show it - store separately
+                    json_files_for_delete = recent["json_file"].tolist()
+
+                    # Reorder to put view_url first, drop json_file from display
                     recent_display = recent_display.drop(columns=["json_file"])
                     cols_order = ["view_url"] + [c for c in recent_display.columns if c != "view_url"]
                     recent_display = recent_display[cols_order]
@@ -1287,6 +1328,35 @@ if st.session_state.show_settings:
                             "View": st.column_config.LinkColumn("View", width="small", display_text="Open"),
                         },
                     )
+
+                    # Delete email section
+                    st.markdown("**Delete Email**")
+                    st.caption("Move email to deleted folder and remove from feed. This cannot be undone.")
+
+                    # Create options with subject for easier identification
+                    email_options = []
+                    for jf in json_files_for_delete:
+                        row = recent[recent["json_file"] == jf].iloc[0]
+                        subject = str(row.get("subject", ""))[:50]
+                        email_options.append({"json_file": jf, "label": f"{subject}... ({jf[:30]}...)"})
+
+                    if email_options:
+                        del_email_col1, del_email_col2 = st.columns([4, 1])
+                        selected_email_idx = del_email_col1.selectbox(
+                            "Email to delete",
+                            range(len(email_options)),
+                            format_func=lambda i: email_options[i]["label"],
+                            key="delete_email_select",
+                            label_visibility="collapsed",
+                        )
+                        if del_email_col2.button("Delete Email", key="delete_email_btn", type="secondary"):
+                            json_file_to_delete = email_options[selected_email_idx]["json_file"]
+                            if delete_email(json_file_to_delete):
+                                log_user_action("admin", "email_deleted", json_file_to_delete)
+                                st.success(f"Deleted email: {email_options[selected_email_idx]['label']}")
+                                st.rerun()
+                            else:
+                                st.error("Failed to delete email")
                 else:
                     recent_display.columns = ["File", "From", "Subject", "Matched Company", "Injected", "Received"]
                     st.dataframe(recent_display, use_container_width=True, hide_index=True)

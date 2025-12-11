@@ -55,6 +55,7 @@ EMAIL_COLUMNS = [
     "injected",         # Whether added to updates.csv (True/False)
     "received_at",      # Timestamp when webhook received
     "processed_at",     # Timestamp when AI matching completed
+    "status",           # Email status: "inbox" or "deleted"
 ]
 
 # CSV columns for email_senders.csv - one row per unique sender
@@ -134,7 +135,13 @@ def load_emails_df() -> pd.DataFrame:
         # Ensure all columns exist
         for col in EMAIL_COLUMNS:
             if col not in df.columns:
-                df[col] = ""
+                if col == "status":
+                    df[col] = "inbox"  # Default status for existing records
+                else:
+                    df[col] = ""
+        # Fill NaN status values with "inbox"
+        if "status" in df.columns:
+            df["status"] = df["status"].fillna("inbox").replace("", "inbox")
         return df
     except Exception:
         return pd.DataFrame(columns=EMAIL_COLUMNS)
@@ -154,6 +161,7 @@ def save_email_record(
     subject: str,
     matched_company: Optional[str] = None,
     injected: bool = False,
+    status: str = "inbox",
 ) -> Dict[str, Any]:
     """
     Save email record to emails.csv.
@@ -172,6 +180,7 @@ def save_email_record(
         "injected": str(injected),
         "received_at": now,
         "processed_at": now if matched_company else "",
+        "status": status,
     }
 
     with open(EMAILS_CSV, "a", newline="", encoding="utf-8") as f:
@@ -504,3 +513,108 @@ def rebuild_sender_stats():
     new_df = pd.DataFrame(stats)
     new_df.to_csv(SENDERS_CSV, index=False)
     logger.info(f"Rebuilt sender stats: {len(stats)} senders")
+
+
+# =============================================================================
+# Delete Functions
+# =============================================================================
+
+def delete_sender(from_address: str) -> bool:
+    """
+    Delete a sender from email_senders.csv.
+    Only allows deletion if sender has no assigned company.
+
+    Returns True if deleted, False otherwise.
+    """
+    df = load_senders_df()
+
+    if from_address not in df["from_address"].values:
+        logger.warning(f"Sender not found: {from_address}")
+        return False
+
+    # Check if sender has an assigned company
+    sender_row = df[df["from_address"] == from_address].iloc[0]
+    assigned = sender_row.get("assigned_company", "")
+    if assigned and str(assigned).strip() and str(assigned).lower() != "nan":
+        logger.warning(f"Cannot delete sender with assigned company: {from_address} -> {assigned}")
+        return False
+
+    # Delete the sender
+    df = df[df["from_address"] != from_address]
+    df.to_csv(SENDERS_CSV, index=False)
+    logger.info(f"Deleted sender: {from_address}")
+    return True
+
+
+def delete_email(json_file: str) -> bool:
+    """
+    Delete an email:
+    1. Mark status as "deleted" in emails.csv
+    2. Move JSON file to data/emails/deleted/
+    3. Remove from updates.csv and enriched_updates.csv
+
+    Returns True if successful, False otherwise.
+    """
+    import shutil
+
+    # Paths
+    emails_dir = Path("data/emails")
+    processed_dir = emails_dir / "processed"
+    deleted_dir = emails_dir / "deleted"
+    deleted_dir.mkdir(parents=True, exist_ok=True)
+
+    updates_csv = Path("data/updates.csv")
+    enriched_csv = Path("data/enriched_updates.csv")
+
+    # 1. Update emails.csv status
+    df = load_emails_df()
+    if json_file not in df["json_file"].values:
+        logger.warning(f"Email not found in emails.csv: {json_file}")
+        return False
+
+    df.loc[df["json_file"] == json_file, "status"] = "deleted"
+    df.to_csv(EMAILS_CSV, index=False)
+    logger.info(f"Marked email as deleted: {json_file}")
+
+    # 2. Move JSON file to deleted folder
+    email_id = json_file.replace(".json", "")
+    source_url = f"email://{email_id}"
+
+    # Try to find and move the file
+    source_file = emails_dir / json_file
+    if not source_file.exists():
+        source_file = processed_dir / json_file
+
+    if source_file.exists():
+        dest_file = deleted_dir / json_file
+        try:
+            shutil.move(str(source_file), str(dest_file))
+            logger.info(f"Moved email file to deleted: {json_file}")
+        except Exception as e:
+            logger.warning(f"Failed to move email file: {e}")
+
+    # 3. Remove from updates.csv
+    if updates_csv.exists():
+        try:
+            updates_df = pd.read_csv(updates_csv)
+            original_len = len(updates_df)
+            updates_df = updates_df[updates_df["source_url"] != source_url]
+            if len(updates_df) < original_len:
+                updates_df.to_csv(updates_csv, index=False)
+                logger.info(f"Removed from updates.csv: {source_url}")
+        except Exception as e:
+            logger.warning(f"Failed to update updates.csv: {e}")
+
+    # 4. Remove from enriched_updates.csv
+    if enriched_csv.exists():
+        try:
+            enriched_df = pd.read_csv(enriched_csv)
+            original_len = len(enriched_df)
+            enriched_df = enriched_df[enriched_df["source_url"] != source_url]
+            if len(enriched_df) < original_len:
+                enriched_df.to_csv(enriched_csv, index=False)
+                logger.info(f"Removed from enriched_updates.csv: {source_url}")
+        except Exception as e:
+            logger.warning(f"Failed to update enriched_updates.csv: {e}")
+
+    return True
