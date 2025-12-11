@@ -131,10 +131,15 @@ POST /email (port 8001)
 3. Subscribe to competitor newsletters
 
 **Tracking files:**
-- `emails.csv` — One row per email (unique by filename)
+- `emails.csv` — One row per email (unique by filename, tracks status: inbox/deleted)
 - `email_senders.csv` — Aggregated stats per sender address
 
-Unmatched senders can be manually assigned in the dashboard (Settings → Emails tab). Future emails from assigned senders skip AI matching.
+**Email Management:**
+- View formatted emails by clicking links in the feed or Recent Emails table
+- Manually assign senders to competitors (future emails auto-match)
+- Delete emails (moves to `deleted/` folder, updates stats)
+- Delete unassigned senders
+- Rebuild stats from inbox emails anytime
 
 ---
 
@@ -152,8 +157,8 @@ Unmatched senders can be manually assigned in the dashboard (Settings → Emails
 |-----|----------|
 | **Configuration** | Add/remove competitors, edit URLs, global settings |
 | **Categories** | Define AI classification categories and impact rules |
-| **Emails** | View newsletter senders, reassign matches |
-| **Data Quality** | Run enrichment, QA sampling tools |
+| **Emails** | Sender stats, company assignments, view/delete emails |
+| **Data Quality** | Run enrichment, rebuild stats, QA sampling tools |
 
 ---
 
@@ -182,10 +187,16 @@ config/
 data/                    # CSV + Parquet storage (gitignored)
   ├── updates.csv        # All competitor content
   ├── enriched_updates.csv
-  ├── emails.csv         # Email log (one row per email)
+  ├── emails.csv         # Email log (one row per email, status tracking)
   ├── email_senders.csv  # Sender stats (received/processed/injected counts)
   └── emails/            # Raw email JSON files
-      └── processed/     # Emails injected into pipeline
+      ├── processed/     # Emails injected into pipeline
+      └── deleted/       # Soft-deleted emails
+
+logs/                    # Timestamped log files (gitignored)
+  ├── system_*.log       # Application events
+  ├── usage_*.log        # User interactions
+  └── webhook_*.log      # Email webhook events
 ```
 
 ---

@@ -1,0 +1,106 @@
+================================================================================
+CAPTAIN'S LOG: pretty-up-emails-and-admin-area
+Date: 2025-12-11 14:00:00
+Previous Log: caplog-20251209-202800-added-some-cool-features-and-email-ingestion.txt
+================================================================================
+
+## Summary
+Enhanced the email admin system with comprehensive tracking, a formatted email
+viewer, and delete functionality. Also fixed critical date parsing issues and
+improved logging with timestamped, session-based log files.
+
+## Current State
+The email system now has full lifecycle management:
+- Dual CSV tracking: emails.csv (individual emails) + email_senders.csv (sender stats)
+- 4-stage pipeline: RECEIVED → MATCHED → QUALIFIED → INJECTED
+- Formatted email viewer accessible via clickable links in the dashboard
+- Delete functionality for both senders and emails (soft-delete pattern)
+- Timestamped log files that rotate at 1MB
+
+Dashboard Settings/Emails tab provides:
+- Sender statistics table with company assignment
+- Recent emails list with clickable "Open" links to view formatted emails
+- Delete controls for unassigned senders and individual emails
+
+## Work Completed
+- **Email Tracking System (`app/email_matcher.py`):**
+  - Added `emails.csv` tracking individual emails with status column
+  - Added `email_senders.csv` for sender statistics and company assignment
+  - `save_email_record()` - Track each incoming email
+  - `update_sender_stats()` - Aggregate sender metrics
+  - `get_sender_assigned_company()` / `set_sender_assigned_company()`
+  - `delete_sender()` - Remove unassigned senders
+  - `delete_email()` - Soft-delete with file relocation
+
+- **Email Viewer (`app/webhook_server.py`):**
+  - Added `/email/view/{email_id}` endpoint returning styled HTML
+  - `format_email_html()` - Renders email with styled header, preserves links
+  - Handles URL encoding for special characters in email IDs
+  - Searches both `data/emails/` and `data/emails/processed/`
+
+- **Date Parsing Fix (`jobs/enrich_updates.py`, `streamlit_app/Home.py`):**
+  - `pd.to_datetime(..., utc=True)` was converting ISO strings to NaT
+  - Replaced with `dateutil.parser.parse()` via `_parse_datetime_to_utc()`
+  - Properly handles timezone-aware datetime strings like `2025-12-10 03:50:30+00:00`
+
+- **Logging Improvements (`app/logger.py`):**
+  - Session-timestamped log files: `system_YYYYMMDD_HHMMSS.log`
+  - Separate webhook log: `webhook_YYYYMMDD_HHMMSS.log`
+  - 1MB rotation limit with 5 backup files
+  - Added `get_webhook_logger()` and webhook-specific logging functions
+
+- **Dashboard UI (`streamlit_app/Home.py`):**
+  - Sender Statistics table with inline company assignment
+  - Clickable email links using `st.column_config.LinkColumn`
+  - Delete unassigned sender dropdown and button
+  - Delete email dropdown (shows subject preview) and button
+  - Filters deleted emails from Recent Emails display
+
+## Decisions Made
+- **Soft-delete pattern:** Emails marked as "deleted" in CSV, files moved to
+  `data/emails/deleted/` subfolder. Allows potential recovery if needed.
+- **Status tracking in emails.csv:** Simple "inbox"/"deleted" status column
+  rather than complex state machine. Can extend later if needed.
+- **dateutil.parser over pd.to_datetime:** More robust handling of timezone-
+  aware ISO strings. Pandas UTC conversion was destructive.
+- **URL encoding for email IDs:** CloudMailin filenames contain `=` and `+`
+  characters that break URLs without proper encoding.
+- **Timestamped log files:** Fresh log per session makes debugging easier,
+  avoids huge monolithic log files.
+
+## Issues Encountered
+- **Email links not clickable:** Initially used `st.markdown()` which doesn't
+  render HTML links properly. Switched to `st.dataframe()` with `LinkColumn`.
+- **Date parsing producing NaT:** `pd.to_datetime(utc=True)` failed on ISO
+  strings with timezone offsets. Fixed with dateutil parser.
+- **Email IDs with special chars:** URLs with `=` and `+` broke the email
+  viewer endpoint. Fixed with `urllib.parse.quote(email_id, safe="")`.
+
+## Commits Made
+- 169b46c: Add delete functionality for senders and emails
+- 490538c: Simplify Sender Statistics UI in Emails tab
+- 0d75351: Add timestamped log files and separate webhook log
+- 110e8b7: Add clickable email links to Recent Emails table in Settings
+- aa99bd9: Add email tracking system and formatted email viewer
+- 6b7f49e: Add immediate email processing to webhook server
+- 8388f4a: Add Categories tab to settings page
+- 01952d9: Move classification config to monitors.yaml
+
+## Mistakes & Lessons
+- **Pandas UTC conversion is tricky:** `pd.to_datetime(utc=True)` doesn't handle
+  all timezone-aware strings well. When in doubt, use dateutil for parsing.
+- **Test with real data:** The email ID URL encoding issue only appeared with
+  actual CloudMailin filenames, not test data.
+- **Streamlit component limitations:** Can't use HTML in `st.markdown()` for
+  interactive elements. Native components like `LinkColumn` are the way to go.
+
+## Next Steps
+- Test delete functionality with real emails
+- Consider adding "restore" functionality for deleted emails
+- Add email filtering/search in Recent Emails
+- Consider pagination for large email volumes
+- Deploy updated code to production server
+
+================================================================================
+END OF LOG
+================================================================================
