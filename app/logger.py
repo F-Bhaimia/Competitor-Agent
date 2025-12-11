@@ -1,13 +1,16 @@
 """
 Centralized logging configuration for Competitor News Monitor.
 
-Two log files:
-- system.log: Application startup, scanning activity, job execution
-- usage.log: User interactions with the Streamlit dashboard (IP-identified)
+Three log files (timestamped on each service start):
+- system_YYYYMMDD_HHMMSS.log: Application startup, scanning activity, job execution
+- usage_YYYYMMDD_HHMMSS.log: User interactions with the Streamlit dashboard (IP-identified)
+- webhook_YYYYMMDD_HHMMSS.log: Email webhook events
 
 Log level is configurable via config/monitors.yaml:
   global:
     log_level: "INFO"  # or "DEBUG" for verbose output
+
+Logs rotate when they exceed 1MB in size.
 """
 
 import logging
@@ -26,17 +29,21 @@ LOG_DIR.mkdir(exist_ok=True)
 # Config file path
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "monitors.yaml"
 
-# Log file paths
-SYSTEM_LOG_FILE = LOG_DIR / "system.log"
-USAGE_LOG_FILE = LOG_DIR / "usage.log"
+# Generate timestamp for this session's log files
+_SESSION_TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+# Log file paths (timestamped per session)
+SYSTEM_LOG_FILE = LOG_DIR / f"system_{_SESSION_TIMESTAMP}.log"
+USAGE_LOG_FILE = LOG_DIR / f"usage_{_SESSION_TIMESTAMP}.log"
+WEBHOOK_LOG_FILE = LOG_DIR / f"webhook_{_SESSION_TIMESTAMP}.log"
 
 # Log format strings
 SYSTEM_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s"
 USAGE_FORMAT = "%(asctime)s | %(levelname)-8s | %(ip)-15s | %(action)-20s | %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
-# Max log file size (10MB) and backup count
-MAX_BYTES = 10 * 1024 * 1024
+# Max log file size (1MB) and backup count
+MAX_BYTES = 1 * 1024 * 1024
 BACKUP_COUNT = 5
 
 
@@ -224,6 +231,50 @@ def get_usage_logger() -> UsageLogAdapter:
 
 
 # =============================================================================
+# WEBHOOK LOGGER
+# =============================================================================
+
+_webhook_logger: Optional[logging.Logger] = None
+
+
+def get_webhook_logger() -> logging.Logger:
+    """
+    Get the webhook logger for email/webhook events.
+
+    Logs to a separate webhook_TIMESTAMP.log file.
+
+    Usage:
+        from app.logger import get_webhook_logger
+        logger = get_webhook_logger()
+        logger.info("Email received from sender@example.com")
+
+    Returns:
+        Configured logger instance
+    """
+    global _webhook_logger
+
+    if _webhook_logger is None:
+        _webhook_logger = logging.getLogger("competitor_agent_webhook")
+        _webhook_logger.setLevel(logging.DEBUG)
+
+        # File handler
+        file_formatter = logging.Formatter(SYSTEM_FORMAT, DATE_FORMAT)
+        file_handler = _create_handler(WEBHOOK_LOG_FILE, file_formatter, level=_CONFIG_LOG_LEVEL)
+        _webhook_logger.addHandler(file_handler)
+
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(file_formatter)
+        console_handler.setLevel(_CONFIG_LOG_LEVEL)
+        _webhook_logger.addHandler(console_handler)
+
+        # Prevent propagation
+        _webhook_logger.propagate = False
+
+    return _webhook_logger
+
+
+# =============================================================================
 # CONVENIENCE FUNCTIONS
 # =============================================================================
 
@@ -233,7 +284,7 @@ def log_startup(component: str, version: str = "1.0.0"):
     logger.info("=" * 60)
     logger.info(f"STARTUP: {component} v{version}")
     logger.info(f"PID: {os.getpid()}")
-    logger.info(f"Log directory: {LOG_DIR}")
+    logger.info(f"Log file: {SYSTEM_LOG_FILE}")
     logger.info("=" * 60)
 
 
@@ -314,18 +365,19 @@ def log_user_action(ip: str, action: str, details: str = ""):
 
 def log_webhook_startup(host: str, port: int):
     """Log webhook server startup."""
-    logger = get_system_logger("webhook")
+    logger = get_webhook_logger()
     logger.info("=" * 60)
     logger.info(f"WEBHOOK SERVER STARTED")
     logger.info(f"Listening on: http://{host}:{port}")
     logger.info(f"Endpoint: POST /email")
     logger.info(f"PID: {os.getpid()}")
+    logger.info(f"Log file: {WEBHOOK_LOG_FILE}")
     logger.info("=" * 60)
 
 
 def log_email_received(from_addr: str, subject: str, filename: str, size_bytes: int = None):
     """Log receipt of an email via webhook."""
-    logger = get_system_logger("webhook")
+    logger = get_webhook_logger()
     msg = f"EMAIL RECEIVED: From='{from_addr}' Subject='{subject[:60]}'"
     if size_bytes:
         msg += f" Size={size_bytes} bytes"
@@ -335,7 +387,7 @@ def log_email_received(from_addr: str, subject: str, filename: str, size_bytes: 
 
 def log_email_error(error: str, from_addr: str = None, details: str = None):
     """Log an error during email processing."""
-    logger = get_system_logger("webhook")
+    logger = get_webhook_logger()
     msg = f"EMAIL ERROR: {error}"
     if from_addr:
         msg += f" From='{from_addr}'"
@@ -346,7 +398,7 @@ def log_email_error(error: str, from_addr: str = None, details: str = None):
 
 def log_email_processing_start(file_count: int):
     """Log start of email processing job."""
-    logger = get_system_logger("process_emails")
+    logger = get_webhook_logger()
     logger.info("=" * 60)
     logger.info(f"EMAIL PROCESSING STARTED: {file_count} files to process")
     logger.info("=" * 60)
@@ -354,19 +406,19 @@ def log_email_processing_start(file_count: int):
 
 def log_email_processed(filename: str, company: str, subject: str):
     """Log successful processing of an email."""
-    logger = get_system_logger("process_emails")
+    logger = get_webhook_logger()
     logger.info(f"PROCESSED: [{company}] '{subject[:50]}' from {filename}")
 
 
 def log_email_skipped(filename: str, reason: str):
     """Log when an email is skipped."""
-    logger = get_system_logger("process_emails")
+    logger = get_webhook_logger()
     logger.debug(f"SKIPPED: {filename} - {reason}")
 
 
 def log_email_processing_complete(files_processed: int, articles_added: int, duration_seconds: float):
     """Log completion of email processing job."""
-    logger = get_system_logger("process_emails")
+    logger = get_webhook_logger()
     logger.info(f"EMAIL PROCESSING COMPLETE: {files_processed} files processed, "
                 f"{articles_added} articles added in {duration_seconds:.1f}s")
 
