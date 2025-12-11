@@ -1202,72 +1202,43 @@ if st.session_state.show_settings:
 
             # Sender statistics table with assignment capability
             st.subheader("Sender Statistics")
-            st.caption("Assign a company to auto-match future emails from that sender.")
 
             if not senders_df.empty:
-                # Get competitor names for dropdown
+                # Display table
+                display_df = senders_df[["from_address", "emails_received", "emails_processed", "emails_injected", "assigned_company", "last_seen"]].copy()
+                display_df.columns = ["Email Address", "Received", "Processed", "Injected", "Assigned Company", "Last Seen"]
+
+                def highlight_unassigned(val):
+                    if not val or str(val).lower() == "nan" or val == "":
+                        return "background-color: #fff3cd"
+                    return ""
+
+                styled_df = display_df.style.applymap(highlight_unassigned, subset=["Assigned Company"])
+                st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
+                # Assignment section
+                st.markdown("**Assign Sender to Company**")
+                st.caption("Select a sender and assign them to a competitor. Future emails from that sender will auto-match.")
+
                 competitor_options = ["(unassigned)"] + get_competitor_names()
+                sender_options = senders_df["from_address"].tolist()
 
-                # Column headers
-                header_cols = st.columns([3, 1, 1, 1, 2, 1])
-                header_cols[0].markdown("**Email Address**")
-                header_cols[1].markdown("**Received**")
-                header_cols[2].markdown("**Processed**")
-                header_cols[3].markdown("**Injected**")
-                header_cols[4].markdown("**Assign To**")
-                header_cols[5].markdown("")
-                st.divider()
+                col1, col2, col3 = st.columns([3, 2, 1])
+                selected_sender = col1.selectbox("Sender", sender_options, key="assign_sender_select", label_visibility="collapsed", placeholder="Select sender...")
 
-                # Create editable view
-                for idx, row in senders_df.iterrows():
-                    with st.container():
-                        cols = st.columns([3, 1, 1, 1, 2, 1])
+                # Get current assignment for selected sender
+                current = senders_df[senders_df["from_address"] == selected_sender]["assigned_company"].values
+                current_val = current[0] if len(current) > 0 and current[0] else ""
+                default_idx = competitor_options.index(current_val) if current_val in competitor_options else 0
 
-                        # Email address
-                        cols[0].text(row["from_address"])
+                selected_company = col2.selectbox("Company", competitor_options, index=default_idx, key="assign_company_select", label_visibility="collapsed")
 
-                        # Stats
-                        cols[1].text(str(int(row.get("emails_received", 0) or 0)))
-                        cols[2].text(str(int(row.get("emails_processed", 0) or 0)))
-                        cols[3].text(str(int(row.get("emails_injected", 0) or 0)))
-
-                        # Assignment dropdown
-                        current_assignment = row.get("assigned_company", "") or ""
-                        if current_assignment and current_assignment in competitor_options:
-                            default_idx = competitor_options.index(current_assignment)
-                        else:
-                            default_idx = 0
-
-                        new_assignment = cols[4].selectbox(
-                            "Assign to",
-                            options=competitor_options,
-                            index=default_idx,
-                            key=f"sender_assign_{idx}",
-                            label_visibility="collapsed",
-                        )
-
-                        # Save button
-                        if cols[5].button("Save", key=f"sender_save_{idx}"):
-                            company_to_save = "" if new_assignment == "(unassigned)" else new_assignment
-                            set_sender_assigned_company(row["from_address"], company_to_save)
-                            log_user_action("admin", "sender_assigned", f"{row['from_address']} -> {company_to_save or 'unassigned'}")
-                            st.success(f"Saved: {row['from_address']} -> {new_assignment}")
-                            st.rerun()
-
-                        st.divider()
-
-                # Summary table view
-                with st.expander("View as Table"):
-                    display_df = senders_df[["from_address", "emails_received", "emails_processed", "emails_injected", "assigned_company", "last_seen"]].copy()
-                    display_df.columns = ["Email Address", "# Received", "# Processed", "# Injected", "Assigned Company", "Last Seen"]
-
-                    def highlight_unassigned(val):
-                        if not val or str(val).lower() == "nan" or val == "":
-                            return "background-color: #fff3cd"
-                        return ""
-
-                    styled_df = display_df.style.applymap(highlight_unassigned, subset=["Assigned Company"])
-                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                if col3.button("Save Assignment", key="save_sender_assignment"):
+                    company_to_save = "" if selected_company == "(unassigned)" else selected_company
+                    set_sender_assigned_company(selected_sender, company_to_save)
+                    log_user_action("admin", "sender_assigned", f"{selected_sender} -> {company_to_save or 'unassigned'}")
+                    st.success(f"Assigned: {selected_sender} → {selected_company}")
+                    st.rerun()
 
             st.divider()
 
