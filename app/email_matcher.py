@@ -481,6 +481,7 @@ def record_email_injected(json_file: str, from_address: str):
 def rebuild_sender_stats():
     """
     Rebuild email_senders.csv from emails.csv.
+    Only counts inbox emails (excludes deleted).
     Useful for data recovery or migration.
     """
     emails_df = load_emails_df()
@@ -489,9 +490,13 @@ def rebuild_sender_stats():
         logger.info("No emails to rebuild stats from")
         return
 
+    # Filter to only inbox emails (not deleted)
+    inbox_df = emails_df[emails_df["status"] != "deleted"]
+    logger.info(f"Rebuilding stats from {len(inbox_df)} inbox emails ({len(emails_df) - len(inbox_df)} deleted)")
+
     # Group by sender and calculate stats
     stats = []
-    for from_address, group in emails_df.groupby("from_address"):
+    for from_address, group in inbox_df.groupby("from_address"):
         stats.append({
             "from_address": from_address,
             "emails_received": len(group),
