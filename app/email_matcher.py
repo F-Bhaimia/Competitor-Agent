@@ -519,6 +519,37 @@ def rebuild_sender_stats():
 # Delete Functions
 # =============================================================================
 
+def _decrement_sender_stats(
+    from_address: str,
+    received: int = 0,
+    processed: int = 0,
+    injected: int = 0,
+):
+    """
+    Decrement sender statistics when an email is deleted.
+    Ensures counts don't go below zero.
+    """
+    df = load_senders_df()
+
+    if from_address not in df["from_address"].values:
+        logger.warning(f"Sender not found for stats decrement: {from_address}")
+        return
+
+    idx = df[df["from_address"] == from_address].index[0]
+
+    # Decrement counts, ensuring they don't go negative
+    current_received = int(df.loc[idx, "emails_received"] or 0)
+    current_processed = int(df.loc[idx, "emails_processed"] or 0)
+    current_injected = int(df.loc[idx, "emails_injected"] or 0)
+
+    df.loc[idx, "emails_received"] = max(0, current_received - received)
+    df.loc[idx, "emails_processed"] = max(0, current_processed - processed)
+    df.loc[idx, "emails_injected"] = max(0, current_injected - injected)
+
+    df.to_csv(SENDERS_CSV, index=False)
+    logger.info(f"Decremented sender stats: {from_address} (-{received} recv, -{processed} proc, -{injected} inj)")
+
+
 def delete_sender(from_address: str) -> bool:
     """
     Delete a sender from email_senders.csv.
@@ -550,8 +581,9 @@ def delete_email(json_file: str) -> bool:
     """
     Delete an email:
     1. Mark status as "deleted" in emails.csv
-    2. Move JSON file to data/emails/deleted/
-    3. Remove from updates.csv and enriched_updates.csv
+    2. Update sender stats (decrement counts)
+    3. Move JSON file to data/emails/deleted/
+    4. Remove from updates.csv and enriched_updates.csv
 
     Returns True if successful, False otherwise.
     """
@@ -566,17 +598,33 @@ def delete_email(json_file: str) -> bool:
     updates_csv = Path("data/updates.csv")
     enriched_csv = Path("data/enriched_updates.csv")
 
-    # 1. Update emails.csv status
+    # 1. Get email record and update status
     df = load_emails_df()
     if json_file not in df["json_file"].values:
         logger.warning(f"Email not found in emails.csv: {json_file}")
         return False
 
+    # Get email info before marking deleted (for sender stats update)
+    email_row = df[df["json_file"] == json_file].iloc[0]
+    from_address = email_row.get("from_address", "")
+    matched_company = email_row.get("matched_company", "")
+    was_injected = str(email_row.get("injected", "")).lower() == "true"
+    was_processed = matched_company and matched_company != "unmatched"
+
     df.loc[df["json_file"] == json_file, "status"] = "deleted"
     df.to_csv(EMAILS_CSV, index=False)
     logger.info(f"Marked email as deleted: {json_file}")
 
-    # 2. Move JSON file to deleted folder
+    # 2. Update sender stats (decrement counts)
+    if from_address:
+        _decrement_sender_stats(
+            from_address,
+            received=1,
+            processed=1 if was_processed else 0,
+            injected=1 if was_injected else 0,
+        )
+
+    # 3. Move JSON file to deleted folder
     email_id = json_file.replace(".json", "")
     source_url = f"email://{email_id}"
 
@@ -593,7 +641,7 @@ def delete_email(json_file: str) -> bool:
         except Exception as e:
             logger.warning(f"Failed to move email file: {e}")
 
-    # 3. Remove from updates.csv
+    # 4. Remove from updates.csv
     if updates_csv.exists():
         try:
             updates_df = pd.read_csv(updates_csv)
@@ -605,7 +653,7 @@ def delete_email(json_file: str) -> bool:
         except Exception as e:
             logger.warning(f"Failed to update updates.csv: {e}")
 
-    # 4. Remove from enriched_updates.csv
+    # 5. Remove from enriched_updates.csv
     if enriched_csv.exists():
         try:
             enriched_df = pd.read_csv(enriched_csv)
