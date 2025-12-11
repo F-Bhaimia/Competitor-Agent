@@ -9,6 +9,7 @@ slack_sdk
 matplotlib
 python-pptx
 weasyprint
+reportlab
 pydantic
 tenacity
 lxml
