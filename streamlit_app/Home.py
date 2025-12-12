@@ -365,13 +365,16 @@ def load_data():
         if col not in df.columns:
             df[col] = default
 
-    # Unified reference date: prefer published_at, fallback to collected_at
-    pub = df.get("published_at")
+    # Unified reference date: prefer collected_at (when we discovered it) for competitive intelligence
+    # published_at can be years old for blog archive crawls, which isn't useful for CI
     coll = df.get("collected_at")
-    if pub is not None or coll is not None:
-        df["date_ref"] = pub.where(pub.notna(), coll) if pub is not None else coll
+    if coll is not None:
+        df["date_ref"] = coll
+    elif "date_ref" in df.columns:
+        df["date_ref"] = df["date_ref"].apply(_parse_datetime_to_utc)
     else:
-        df["date_ref"] = pd.NaT
+        pub = df.get("published_at")
+        df["date_ref"] = pub if pub is not None else pd.NaT
 
     return df, path
 
