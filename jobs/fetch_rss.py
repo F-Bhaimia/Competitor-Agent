@@ -1,6 +1,6 @@
 # jobs/fetch_rss.py
 import argparse, os, sys, time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import pandas as pd
 import feedparser
 
@@ -29,8 +29,11 @@ def parse_pubdate(entry):
     return datetime.now(timezone.utc)
 
 def main():
+    # Default: 7 days ago
+    default_since = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+
     parser = argparse.ArgumentParser(description="Fetch competitor RSS into updates.csv")
-    parser.add_argument("--since", type=str, required=True, help="YYYY-MM-DD (UTC)")
+    parser.add_argument("--since", type=str, default=default_since, help="YYYY-MM-DD (UTC), default: 7 days ago")
     parser.add_argument("--out", type=str, default=OUT_DEFAULT)
     args = parser.parse_args()
 
