@@ -1752,7 +1752,14 @@ with tab_edits:
 
 # --------------------------- Tab: Executive Summary ---------------------------
 with tab_summary:
+    # Build date range label for display
+    dr_label = ""
+    if date_from and date_to:
+        dr_label = f"{pd.Timestamp(date_from):%b %d, %Y} – {pd.Timestamp(date_to):%b %d, %Y}"
+
     st.subheader("Executive Summary")
+    if dr_label:
+        st.caption(f"📅 Date range: **{dr_label}** ({len(f)} articles from {f['company'].nunique() if not f.empty else 0} competitors)")
 
     if "exec_blocks" not in st.session_state:
         st.session_state["exec_blocks"] = None
@@ -1762,9 +1769,6 @@ with tab_summary:
         gen_click = st.button("Generate Executive Summary", key="btn_exec_generate")
     with cc2:
         if st.session_state["exec_blocks"]:
-            dr_label = ""
-            if date_from and date_to:
-                dr_label = f"{pd.Timestamp(date_from):%b %d, %Y} – {pd.Timestamp(date_to):%b %d, %Y}"
             pdf_bytes = exec_blocks_to_pdf(st.session_state["exec_blocks"], dr_label)
             st.download_button(
                 "Download PDF",
