@@ -1,18 +1,18 @@
 # Competitor News Monitor - Docker Image
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 # Install system dependencies for Playwright and WeasyPrint
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Playwright dependencies
+    # Core utilities
+    curl git \
+    # Playwright browser dependencies
     libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
     libcups2 libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 \
     libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
-    libcairo2 libasound2 libatspi2.0-0 libwayland-client0 \
-    # WeasyPrint dependencies
-    libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 \
+    libcairo2 libatspi2.0-0 \
+    # WeasyPrint/PDF dependencies
+    libpangocairo-1.0-0 libgdk-pixbuf2.0-0 \
     libffi-dev shared-mime-info \
-    # General utilities
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
