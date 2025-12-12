@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev shared-mime-info \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /opt/competitor-agent
 
 # Install Python dependencies first (for layer caching)
 COPY requirements.txt .
@@ -29,6 +29,9 @@ COPY . .
 
 # Create directories for data persistence
 RUN mkdir -p data logs exports config
+
+# Add application to Python path
+ENV PYTHONPATH=/opt/competitor-agent
 
 # Expose ports
 EXPOSE 8501 8001
