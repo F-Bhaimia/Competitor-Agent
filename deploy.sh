@@ -1,33 +1,56 @@
 #!/bin/bash
 
-# Competitor News Monitor - Automated Deployment Script for Vultr
-# This script automates the deployment process on a fresh Ubuntu/Debian server
+# Competitor News Monitor - Automated Deployment Script
+# Works on fresh Ubuntu/Debian servers OR existing installations
+# Usage: sudo ./deploy.sh [OPTIONS]
+#   --no-nginx    Skip nginx setup (if you have your own reverse proxy)
+#   --no-ssl      Skip SSL setup prompts
+#   --app-dir     Custom application directory (default: /opt/competitor-agent)
 
 set -e  # Exit on error
 
-echo "=========================================="
-echo "Competitor News Monitor - Deployment"
-echo "=========================================="
-echo ""
+# ============================================
+# CONFIGURATION
+# ============================================
+APP_DIR="${APP_DIR:-/opt/competitor-agent}"
+GIT_REPO="https://github.com/F-Bhaimia/Competitor-Agent.git"
+SETUP_NGINX=true
+SETUP_SSL=false
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --no-nginx) SETUP_NGINX=false; shift ;;
+        --no-ssl) SETUP_SSL=false; shift ;;
+        --app-dir) APP_DIR="$2"; shift 2 ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-# Function to print colored output
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
+print_success() { echo -e "${GREEN}✓ $1${NC}"; }
+print_error() { echo -e "${RED}✗ $1${NC}"; }
+print_info() { echo -e "${BLUE}→ $1${NC}"; }
+print_warn() { echo -e "${YELLOW}! $1${NC}"; }
 
-print_error() {
-    echo -e "${RED}✗ $1${NC}"
-}
+echo ""
+echo "=========================================="
+echo "   COMPETITOR NEWS MONITOR - DEPLOYMENT"
+echo "=========================================="
+echo ""
+echo "  App Directory: $APP_DIR"
+echo "  Setup Nginx:   $SETUP_NGINX"
+echo ""
 
-print_info() {
-    echo -e "${YELLOW}→ $1${NC}"
-}
+# ============================================
+# PRE-FLIGHT CHECKS
+# ============================================
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
@@ -35,89 +58,155 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-print_info "Starting deployment..."
-echo ""
+# Detect OS
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS=$ID
+    print_info "Detected OS: $OS $VERSION_ID"
+else
+    print_warn "Could not detect OS, assuming Debian-based"
+    OS="debian"
+fi
 
-# Step 1: Update system
-print_info "Step 1/10: Updating system packages..."
-apt update && apt upgrade -y
-print_success "System updated"
-echo ""
+# ============================================
+# STEP 1: SYSTEM DEPENDENCIES
+# ============================================
+print_info "Step 1/8: Installing system dependencies..."
 
-# Step 2: Install dependencies
-print_info "Step 2/10: Installing system dependencies..."
-apt install -y python3 python3-pip python3-venv git nginx ufw screen curl
+apt-get update -qq
+
+# Core packages
+apt-get install -y -qq python3 python3-pip python3-venv git curl
 
 # Playwright system dependencies
-apt install -y libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+apt-get install -y -qq \
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
     libcups2 libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 \
     libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
-    libcairo2 libasound2 libatspi2.0-0 libwayland-client0
+    libcairo2 libasound2 libatspi2.0-0 libwayland-client0 2>/dev/null || true
 
-print_success "Dependencies installed"
-echo ""
+# Nginx (if needed)
+if [ "$SETUP_NGINX" = true ]; then
+    apt-get install -y -qq nginx
+fi
 
-# Step 3: Set up application directory
-print_info "Step 3/10: Setting up application directory..."
-APP_DIR="/opt/competitor-agent"
-mkdir -p $APP_DIR
-cd $APP_DIR
+# Firewall
+apt-get install -y -qq ufw
+
+print_success "System dependencies installed"
+
+# ============================================
+# STEP 2: APPLICATION DIRECTORY
+# ============================================
+print_info "Step 2/8: Setting up application directory..."
+
+mkdir -p "$APP_DIR"
+cd "$APP_DIR"
 
 # Clone or pull repository
 if [ -d ".git" ]; then
     print_info "Repository exists, pulling latest changes..."
-    git pull origin main
+    git fetch origin
+    git reset --hard origin/main
 else
     print_info "Cloning repository..."
-    git clone https://github.com/F-Bhaimia/Competitor-Agent.git .
+    git clone "$GIT_REPO" .
 fi
 
-print_success "Application directory ready"
-echo ""
+# Create required directories
+mkdir -p logs data exports backups
 
-# Step 4: Set up Python virtual environment
-print_info "Step 4/10: Setting up Python virtual environment..."
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-print_success "Python environment configured"
-echo ""
+print_success "Application directory ready: $APP_DIR"
 
-# Step 5: Install Playwright browsers
-print_info "Step 5/10: Installing Playwright browsers..."
-playwright install chromium
-print_success "Playwright installed"
-echo ""
+# ============================================
+# STEP 3: PYTHON ENVIRONMENT
+# ============================================
+print_info "Step 3/8: Setting up Python environment..."
 
-# Step 6: Configure environment variables
-print_info "Step 6/10: Configuring environment variables..."
-if [ ! -f ".env" ]; then
-    echo "OPENAI_API_KEY=your-key-here" > .env
-    echo "SLACK_WEBHOOK_URL=your-webhook-here" >> .env
-    chmod 600 .env
-    print_info "Created .env template - YOU NEED TO EDIT THIS FILE!"
-    echo ""
-    echo "Run: nano $APP_DIR/.env"
-    echo "And add your actual API keys"
-    echo ""
+# Detect Python executable
+PYTHON_CMD=""
+STREAMLIT_CMD=""
+PIP_CMD=""
+
+# Check for existing venv
+if [ -d "$APP_DIR/.venv" ]; then
+    print_info "Found existing virtual environment"
+    PYTHON_CMD="$APP_DIR/.venv/bin/python"
+    STREAMLIT_CMD="$APP_DIR/.venv/bin/streamlit"
+    PIP_CMD="$APP_DIR/.venv/bin/pip"
+    source "$APP_DIR/.venv/bin/activate"
+elif [ -d "$APP_DIR/venv" ]; then
+    print_info "Found existing virtual environment (venv)"
+    PYTHON_CMD="$APP_DIR/venv/bin/python"
+    STREAMLIT_CMD="$APP_DIR/venv/bin/streamlit"
+    PIP_CMD="$APP_DIR/venv/bin/pip"
+    source "$APP_DIR/venv/bin/activate"
 else
-    print_info ".env file already exists, skipping..."
+    # Check if streamlit is already available system-wide
+    if command -v streamlit &> /dev/null; then
+        print_info "Found system-wide streamlit installation"
+        PYTHON_CMD=$(which python3)
+        STREAMLIT_CMD=$(which streamlit)
+        PIP_CMD=$(which pip3)
+    else
+        # Create new virtual environment
+        print_info "Creating new virtual environment..."
+        python3 -m venv .venv
+        PYTHON_CMD="$APP_DIR/.venv/bin/python"
+        STREAMLIT_CMD="$APP_DIR/.venv/bin/streamlit"
+        PIP_CMD="$APP_DIR/.venv/bin/pip"
+        source "$APP_DIR/.venv/bin/activate"
+    fi
 fi
+
+# Install/upgrade dependencies
+print_info "Installing Python dependencies..."
+$PIP_CMD install --upgrade pip -q
+$PIP_CMD install -r requirements.txt -q
+
+print_success "Python environment configured"
+print_info "  Python: $PYTHON_CMD"
+print_info "  Streamlit: $STREAMLIT_CMD"
+
+# ============================================
+# STEP 4: PLAYWRIGHT BROWSERS
+# ============================================
+print_info "Step 4/8: Installing Playwright browsers..."
+
+$PYTHON_CMD -m playwright install chromium 2>/dev/null || true
+$PYTHON_CMD -m playwright install-deps 2>/dev/null || true
+
+print_success "Playwright installed"
+
+# ============================================
+# STEP 5: ENVIRONMENT FILE
+# ============================================
+print_info "Step 5/8: Configuring environment..."
+
+if [ ! -f "$APP_DIR/.env" ]; then
+    cat > "$APP_DIR/.env" << 'ENVEOF'
+# Competitor News Monitor Configuration
+# Edit these values with your actual keys
+
+OPENAI_API_KEY=your-openai-api-key-here
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+ENVEOF
+    chmod 600 "$APP_DIR/.env"
+    print_warn "Created .env template - YOU MUST EDIT THIS FILE!"
+    print_warn "Run: nano $APP_DIR/.env"
+else
+    print_info ".env file already exists"
+fi
+
 print_success "Environment configuration ready"
-echo ""
 
-# Step 7: Create logs directory
-print_info "Creating logs directory..."
-mkdir -p $APP_DIR/logs
-mkdir -p $APP_DIR/data
-mkdir -p $APP_DIR/exports
-print_success "Directories created"
-echo ""
+# ============================================
+# STEP 6: SYSTEMD SERVICES
+# ============================================
+print_info "Step 6/8: Setting up systemd services..."
 
-# Step 8: Set up systemd service
-print_info "Step 7/10: Setting up systemd service..."
-cat > /etc/systemd/system/competitor-dashboard.service << 'EOL'
+# Dashboard service
+cat > /etc/systemd/system/competitor-dashboard.service << SVCEOF
 [Unit]
 Description=Competitor News Monitor Dashboard
 After=network.target
@@ -125,33 +214,65 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/competitor-agent
-Environment="PATH=/opt/competitor-agent/.venv/bin"
-ExecStart=/opt/competitor-agent/.venv/bin/streamlit run streamlit_app/Home.py --server.port 8501 --server.address 0.0.0.0
+WorkingDirectory=$APP_DIR
+ExecStart=$STREAMLIT_CMD run streamlit_app/Home.py --server.port 8501 --server.address 0.0.0.0
 Restart=always
 RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
-EOL
+SVCEOF
 
+# Webhook service
+cat > /etc/systemd/system/competitor-webhook.service << SVCEOF
+[Unit]
+Description=Competitor News Monitor Webhook Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$APP_DIR
+ExecStart=$PYTHON_CMD -m app.webhook_server
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+# Reload and enable services
 systemctl daemon-reload
 systemctl enable competitor-dashboard
-print_success "Systemd service configured"
-echo ""
+systemctl enable competitor-webhook
 
-# Step 9: Configure Nginx
-print_info "Step 8/10: Configuring Nginx..."
+print_success "Systemd services configured"
 
-# Get server IP
-SERVER_IP=$(curl -s ifconfig.me)
-print_info "Detected server IP: $SERVER_IP"
+# ============================================
+# STEP 7: NGINX (optional)
+# ============================================
+if [ "$SETUP_NGINX" = true ]; then
+    print_info "Step 7/8: Configuring Nginx..."
 
-cat > /etc/nginx/sites-available/competitor-dashboard << EOL
+    SERVER_IP=$(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+    print_info "Server IP: $SERVER_IP"
+
+    cat > /etc/nginx/sites-available/competitor-dashboard << NGINXEOF
 server {
     listen 80;
     server_name $SERVER_IP;
 
+    # Webhook endpoint for email ingestion
+    location /email {
+        proxy_pass http://localhost:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    # Dashboard
     location / {
         proxy_pass http://localhost:8501;
         proxy_http_version 1.1;
@@ -165,102 +286,95 @@ server {
         proxy_read_timeout 86400;
     }
 }
-EOL
+NGINXEOF
 
-# Enable site
-ln -sf /etc/nginx/sites-available/competitor-dashboard /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
+    ln -sf /etc/nginx/sites-available/competitor-dashboard /etc/nginx/sites-enabled/
+    rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
 
-# Test and restart Nginx
-nginx -t
-systemctl restart nginx
-systemctl enable nginx
-print_success "Nginx configured"
-echo ""
+    nginx -t && systemctl restart nginx && systemctl enable nginx
+    print_success "Nginx configured"
+else
+    print_info "Step 7/8: Skipping Nginx setup (--no-nginx)"
+fi
 
-# Step 10: Configure firewall
-print_info "Step 9/10: Configuring firewall..."
-ufw allow 22/tcp
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw --force enable
-print_success "Firewall configured"
-echo ""
+# ============================================
+# STEP 8: FIREWALL & CRON
+# ============================================
+print_info "Step 8/8: Configuring firewall and cron jobs..."
 
-# Step 11: Set up cron job and make scripts executable
-print_info "Step 10/10: Setting up automated crawls..."
-chmod +x $APP_DIR/scripts/*.sh
-chmod +x $APP_DIR/deploy.sh 2>/dev/null || true
+# Firewall
+ufw allow 22/tcp >/dev/null 2>&1
+ufw allow 80/tcp >/dev/null 2>&1
+ufw allow 443/tcp >/dev/null 2>&1
+ufw --force enable >/dev/null 2>&1
 
-# Create cron job
-CRON_JOB="0 2 * * * $APP_DIR/scripts/update_daily.sh >> $APP_DIR/logs/cron.log 2>&1"
-(crontab -l 2>/dev/null | grep -v "update_daily.sh"; echo "$CRON_JOB") | crontab -
-print_success "Cron job configured (runs daily at 2 AM)"
-echo ""
+# Make scripts executable
+chmod +x "$APP_DIR/scripts/"*.sh 2>/dev/null || true
+chmod +x "$APP_DIR/deploy.sh" 2>/dev/null || true
 
-# Start the service
-print_info "Starting dashboard service..."
+# Setup cron jobs
+CRON_DAILY="0 2 * * * $APP_DIR/scripts/update_daily.sh >> $APP_DIR/logs/cron.log 2>&1"
+CRON_EMAIL="0 * * * * cd $APP_DIR && $PYTHON_CMD -m jobs.process_emails >> $APP_DIR/logs/cron.log 2>&1"
+
+(crontab -l 2>/dev/null | grep -v "update_daily.sh" | grep -v "process_emails"; echo "$CRON_DAILY"; echo "$CRON_EMAIL") | crontab -
+
+print_success "Firewall and cron configured"
+
+# ============================================
+# START SERVICES
+# ============================================
+print_info "Starting services..."
+
 systemctl start competitor-dashboard
-sleep 3
-print_success "Dashboard service started"
-echo ""
+systemctl start competitor-webhook
 
-# Final status check
+sleep 3
+
+# ============================================
+# FINAL STATUS
+# ============================================
+echo ""
 echo "=========================================="
 echo "         DEPLOYMENT COMPLETE!"
 echo "=========================================="
 echo ""
 
-# Check service status
+# Check services
 if systemctl is-active --quiet competitor-dashboard; then
-    print_success "Dashboard is running"
+    print_success "Dashboard service is running"
 else
-    print_error "Dashboard failed to start - check logs with: journalctl -u competitor-dashboard -n 50"
+    print_error "Dashboard service failed - check: journalctl -u competitor-dashboard -n 50"
 fi
 
-if systemctl is-active --quiet nginx; then
-    print_success "Nginx is running"
+if systemctl is-active --quiet competitor-webhook; then
+    print_success "Webhook service is running"
 else
-    print_error "Nginx failed to start"
+    print_warn "Webhook service not running (may need .env configuration)"
+fi
+
+if [ "$SETUP_NGINX" = true ] && systemctl is-active --quiet nginx; then
+    print_success "Nginx is running"
 fi
 
 echo ""
 echo "=========================================="
-echo "         IMPORTANT NEXT STEPS"
+echo "         NEXT STEPS"
 echo "=========================================="
 echo ""
 echo "1. Edit your API keys:"
 echo "   nano $APP_DIR/.env"
 echo ""
-echo "2. Restart the dashboard after editing .env:"
-echo "   systemctl restart competitor-dashboard"
+echo "2. Restart services after editing .env:"
+echo "   systemctl restart competitor-dashboard competitor-webhook"
 echo ""
-echo "3. Access your dashboard at:"
+echo "3. Access your dashboard:"
+SERVER_IP=$(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 echo "   http://$SERVER_IP"
 echo ""
-echo "4. Check service status:"
-echo "   systemctl status competitor-dashboard"
-echo ""
-echo "5. View logs:"
-echo "   journalctl -u competitor-dashboard -f"
-echo ""
-echo "=========================================="
-echo "         USEFUL COMMANDS"
-echo "=========================================="
-echo ""
-echo "Check status:         $APP_DIR/scripts/status.sh"
-echo "Update application:   sudo $APP_DIR/scripts/update.sh"
-echo "Restart dashboard:    sudo systemctl restart competitor-dashboard"
-echo "View logs:            journalctl -u competitor-dashboard -f"
-echo "Run manual crawl:     cd $APP_DIR && source .venv/bin/activate && ./scripts/run_pipeline.sh"
+echo "4. Useful commands:"
+echo "   Status:   $APP_DIR/scripts/status.sh"
+echo "   Update:   sudo $APP_DIR/scripts/update.sh quick"
+echo "   Logs:     journalctl -u competitor-dashboard -f"
 echo ""
 echo "=========================================="
-echo "         SCRIPTS REFERENCE"
-echo "=========================================="
-echo ""
-echo "scripts/update.sh       - Update code, deps, and restart services"
-echo "scripts/status.sh       - Health check and status report"
-echo "scripts/update_daily.sh - Daily data crawl (runs via cron)"
-echo "scripts/run_pipeline.sh - Manual pipeline execution"
-echo ""
-print_success "Deployment completed successfully!"
+print_success "Deployment completed!"
