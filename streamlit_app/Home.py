@@ -715,13 +715,45 @@ sel_impacts = st.sidebar.multiselect("Impact", impacts, default=impacts)
 
 min_date = pd.to_datetime(df["date_ref"].min(), errors="coerce", utc=True)
 max_date = pd.to_datetime(df["date_ref"].max(), errors="coerce", utc=True)
+
+# Read date range from URL query params (persists across reloads)
+qp = st.query_params
+default_from = min_date.date() if pd.notna(min_date) else None
+default_to = max_date.date() if pd.notna(max_date) else None
+
+# Parse dates from query params if present
+if "date_from" in qp:
+    try:
+        default_from = pd.to_datetime(qp["date_from"]).date()
+    except Exception:
+        pass
+if "date_to" in qp:
+    try:
+        default_to = pd.to_datetime(qp["date_to"]).date()
+    except Exception:
+        pass
+
 date_from, date_to = st.sidebar.date_input(
     "Date range",
-    value=(min_date.date() if pd.notna(min_date) else None,
-           max_date.date() if pd.notna(max_date) else None),
+    value=(default_from, default_to),
+    key="sidebar_date_range",
 )
 
+# Sync date range back to URL query params for persistence
+if date_from and date_to:
+    st.query_params["date_from"] = str(date_from)
+    st.query_params["date_to"] = str(date_to)
+
 query = st.sidebar.text_input("Search title/summary...", "")
+
+# Reset date filter button
+if st.sidebar.button("Reset date range", key="btn_reset_dates", help="Clear saved date range and show all data"):
+    # Remove date params from URL
+    if "date_from" in st.query_params:
+        del st.query_params["date_from"]
+    if "date_to" in st.query_params:
+        del st.query_params["date_to"]
+    st.rerun()
 
 # Log filter changes
 log_filter_change("companies", st.session_state.prev_filters.get("companies"), sel_companies)
