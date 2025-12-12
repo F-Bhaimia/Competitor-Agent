@@ -1,0 +1,81 @@
+# Competitor News Monitor - Docker Compose
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose logs -f        # View logs
+#   docker compose down           # Stop all services
+#   docker compose pull && docker compose up -d --build  # Update
+
+services:
+  dashboard:
+    build: .
+    container_name: competitor-dashboard
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./exports:/app/exports
+      - ./config:/app/config
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: streamlit run streamlit_app/Home.py --server.port=8501 --server.address=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  webhook:
+    build: .
+    container_name: competitor-webhook
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python -m app.webhook_server
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Daily pipeline runner (RSS fetch + enrichment)
+  # Runs once then exits - use cron to schedule
+  pipeline:
+    build: .
+    container_name: competitor-pipeline
+    profiles: ["jobs"]  # Only runs when explicitly called
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: >
+      sh -c "python -m jobs.fetch_rss && python -m jobs.enrich_updates"
+
+  # Blog crawler (Playwright-based)
+  # Runs once then exits - use cron to schedule
+  crawler:
+    build: .
+    container_name: competitor-crawler
+    profiles: ["jobs"]  # Only runs when explicitly called
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python -m jobs.daily_scan

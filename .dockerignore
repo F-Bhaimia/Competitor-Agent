@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Data files (mounted as volumes)
+data/
+logs/
+exports/
+backups/
+
+# Development files
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docs
+docs/
+*.md
+!requirements.txt
+
+# Other
+.env
+.env.*
+nul
