@@ -1474,87 +1474,16 @@ if st.session_state.show_settings:
 # MAIN DASHBOARD (shown when settings page is not active)
 # =====================================================================
 
-# --------------------------- Navigation (Menu) ---------------------------
-SECTION_LABELS = [
-    "Posts by Competitor",  # KPIs + chart + feed
-    "Export",               # Download filtered CSV
-    "Manual Edits",         # editable grid
-    "Executive Summary",    # Generate + Download PDF
-]
+# --------------------------- Navigation (Tabs) ---------------------------
+tab_dashboard, tab_export, tab_edits, tab_summary = st.tabs([
+    "📊 Dashboard",
+    "📥 Export",
+    "✏️ Manual Edits",
+    "📋 Executive Summary",
+])
 
-# Custom CSS for tab styling
-st.markdown("""
-<style>
-/* Tab container */
-div[data-testid="stHorizontalBlock"].tab-container {
-    border-bottom: 2px solid #e0e0e0;
-    padding-bottom: 0;
-    margin-bottom: 1rem;
-}
-
-/* Base tab button style */
-div[data-testid="stHorizontalBlock"].tab-container button[kind="secondary"] {
-    border: 2px solid #ff4b4b;
-    background-color: transparent;
-    color: #ff4b4b;
-    border-radius: 8px 8px 0 0;
-    border-bottom: none;
-    margin-right: 4px;
-    font-weight: 500;
-}
-
-/* Active tab style */
-div[data-testid="stHorizontalBlock"].tab-container button[kind="primary"] {
-    background-color: #ff4b4b;
-    color: white;
-    border: 2px solid #ff4b4b;
-    border-radius: 8px 8px 0 0;
-    border-bottom: none;
-    margin-right: 4px;
-    font-weight: 600;
-}
-
-/* Hover effect for inactive tabs */
-div[data-testid="stHorizontalBlock"].tab-container button[kind="secondary"]:hover {
-    background-color: #ffeeee;
-    border-color: #ff4b4b;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# Initialize active tab in session state
-if "active_tab" not in st.session_state:
-    st.session_state.active_tab = SECTION_LABELS[0]
-
-# Track previous menu selection for logging
-if "prev_menu" not in st.session_state:
-    st.session_state.prev_menu = None
-
-# Create tab buttons
-tab_cols = st.columns(len(SECTION_LABELS))
-for i, label in enumerate(SECTION_LABELS):
-    with tab_cols[i]:
-        is_active = st.session_state.active_tab == label
-        if st.button(
-            label,
-            key=f"tab_{i}",
-            type="primary" if is_active else "secondary",
-            use_container_width=True
-        ):
-            if st.session_state.active_tab != label:
-                # Log navigation change
-                if st.session_state.prev_menu is not None:
-                    log_user_action(get_client_ip(), "navigation", f"Navigated to: {label}")
-                    logger.debug(f"Navigation: {st.session_state.prev_menu} -> {label}")
-                st.session_state.prev_menu = label
-                st.session_state.active_tab = label
-                st.rerun()
-
-menu = st.session_state.active_tab
-st.session_state.prev_menu = menu
-
-# --------------------------- Section: Posts by Competitor ---------------------------
-if menu == "Posts by Competitor":
+# --------------------------- Tab: Dashboard ---------------------------
+with tab_dashboard:
     # KPIs
     col1, col2, col3 = st.columns(3)
     now_utc = pd.Timestamp.now(tz="UTC")
@@ -1723,8 +1652,8 @@ if menu == "Posts by Competitor":
         hide_index=True,
     )
 
-# --------------------------- Section: Export ---------------------------
-elif menu == "Export":
+# --------------------------- Tab: Export ---------------------------
+with tab_export:
     st.subheader("Export Current View")
     export_cols = [c for c in ["date_ref","company","title","category","impact","source_url","summary"] if c in f.columns]
     export_df = f.sort_values(by=["date_ref"], ascending=False)[export_cols].copy()
@@ -1735,8 +1664,8 @@ elif menu == "Export":
     if st.download_button("Download filtered rows as CSV", data=csv_bytes, file_name=fname, mime="text/csv", key="btn_export_csv"):
         log_user_action(get_client_ip(), "export_csv", f"Exported {len(export_df)} rows to CSV")
 
-# --------------------------- Section: Manual Edits ---------------------------
-elif menu == "Manual Edits":
+# --------------------------- Tab: Manual Edits ---------------------------
+with tab_edits:
     st.subheader("Manual Edit (Summary, Category, Impact)")
     _edit_cols = [c for c in ["summary", "category", "impact"] if c in f.columns]
     _key_cols  = [c for c in ["company", "source_url"] if c in f.columns]
@@ -1805,8 +1734,8 @@ elif menu == "Manual Edits":
                 st.error(f"Failed to save edits: {e}")
                 log_user_action(client_ip, "edit_error", f"Failed to save edits: {e}")
 
-# --------------------------- Section: Executive Summary ---------------------------
-elif menu == "Executive Summary":
+# --------------------------- Tab: Executive Summary ---------------------------
+with tab_summary:
     st.subheader("Executive Summary")
 
     if "exec_blocks" not in st.session_state:
