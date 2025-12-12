@@ -11,13 +11,13 @@ services:
     container_name: competitor-dashboard
     restart: unless-stopped
     ports:
-      - "8501:8501"
+      - "127.0.0.1:8501:8501"  # Only expose to localhost (nginx proxies to 80/443)
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./exports:/app/exports
-      - ./config:/app/config
-      - ./.env:/app/.env:ro
+      - ./data:/opt/competitor-agent/data
+      - ./logs:/opt/competitor-agent/logs
+      - ./exports:/opt/competitor-agent/exports
+      - ./config:/opt/competitor-agent/config
+      - ./.env:/opt/competitor-agent/.env:ro
     environment:
       - PYTHONUNBUFFERED=1
     command: streamlit run streamlit_app/Home.py --server.port=8501 --server.address=0.0.0.0
@@ -33,12 +33,12 @@ services:
     container_name: competitor-webhook
     restart: unless-stopped
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"  # Only expose to localhost (nginx proxies /email)
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./config:/app/config
-      - ./.env:/app/.env:ro
+      - ./data:/opt/competitor-agent/data
+      - ./logs:/opt/competitor-agent/logs
+      - ./config:/opt/competitor-agent/config
+      - ./.env:/opt/competitor-agent/.env:ro
     environment:
       - PYTHONUNBUFFERED=1
     command: python -m app.webhook_server
@@ -56,10 +56,10 @@ services:
     container_name: competitor-pipeline
     profiles: ["jobs"]  # Only runs when explicitly called
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./config:/app/config
-      - ./.env:/app/.env:ro
+      - ./data:/opt/competitor-agent/data
+      - ./logs:/opt/competitor-agent/logs
+      - ./config:/opt/competitor-agent/config
+      - ./.env:/opt/competitor-agent/.env:ro
     environment:
       - PYTHONUNBUFFERED=1
     command: >
@@ -72,10 +72,10 @@ services:
     container_name: competitor-crawler
     profiles: ["jobs"]  # Only runs when explicitly called
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./config:/app/config
-      - ./.env:/app/.env:ro
+      - ./data:/opt/competitor-agent/data
+      - ./logs:/opt/competitor-agent/logs
+      - ./config:/opt/competitor-agent/config
+      - ./.env:/opt/competitor-agent/.env:ro
     environment:
       - PYTHONUNBUFFERED=1
     command: python -m jobs.daily_scan
