@@ -4,6 +4,7 @@ python-dateutil
 pandas
 pyarrow
 openpyxl
+pyyaml
 streamlit
 slack_sdk
 matplotlib
