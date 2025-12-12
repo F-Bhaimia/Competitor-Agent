@@ -11,6 +11,9 @@ from collections import Counter
 from io import BytesIO
 from typing import Dict
 
+from dotenv import load_dotenv
+load_dotenv()  # Load .env file for API keys
+
 import pandas as pd
 import streamlit as st
 import yaml
