@@ -1,5 +1,4 @@
 # jobs/fetch_rss.py
-# jobs/fetch_rss.py
 import argparse, os, sys, time
 from datetime import datetime, timezone
 import pandas as pd
@@ -10,26 +9,6 @@ DATA_DIR = os.path.join(ROOT, "data")
 OUT_DEFAULT = os.path.join(DATA_DIR, "updates.csv")
 
 # ——— Your competitor set ———
-COMPETITORS = [
-    # Club OS
-    ("Club OS", gnews('"Club OS" OR ClubOS')),
-
-    # GloFox (now part of ABC Fitness)
-    ("GloFox (ABC Fitness)", gnews('Glofox OR "GloFox" OR "ABC Glofox"')),
-
-    # Kicksite
-    ("Kicksite", gnews("Kicksite")),
-
-    # MyStudio
-    ("MyStudio", gnews('"MyStudio" OR "MyStudio app"')),
-
-    # Spark Membership
-    ("Spark Membership", gnews('"Spark Membership" OR "Spark Member"')),
-
-    # Zen Planner (Daxko)
-    ("Zen Planner (Daxko)", gnews('"Zen Planner" OR ZenPlanner OR "Daxko Zen Planner"')),
-]
-# Add/adjust competitors as needed
 COMPETITORS = [
     ("Mindbody", "https://news.google.com/rss/search?q=Mindbody&hl=en-US&gl=US&ceid=US:en"),
     ("Glofox",   "https://news.google.com/rss/search?q=Glofox&hl=en-US&gl=US&ceid=US:en"),
