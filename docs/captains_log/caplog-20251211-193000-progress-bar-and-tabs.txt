@@ -1,0 +1,79 @@
+================================================================================
+CAPTAIN'S LOG: progress-bar-and-tabs
+Date: 2025-12-11 19:30:00
+Previous Log: caplog-20251211-140000-pretty-up-emails-and-admin-area.txt
+================================================================================
+
+## Summary
+Continued UI improvements: replaced custom button navigation with native Streamlit
+tabs, added progress bar to Executive Summary generation, and refined email delete
+functionality with proper sender stats updates.
+
+## Current State
+The dashboard now has a cleaner, more consistent UI:
+- Main navigation uses native `st.tabs()` matching the Settings page style
+- Executive Summary shows progress while generating (API calls take time)
+- Email deletion properly updates sender statistics (decrement counts)
+- Stats rebuild excludes deleted emails from calculations
+
+## Work Completed
+- **Dashboard Navigation (`streamlit_app/Home.py`):**
+  - Replaced custom CSS button navigation with native `st.tabs()`
+  - Four tabs: Dashboard, Export, Manual Edits, Executive Summary
+  - Cleaner look matching the Settings page tabs
+  - Removed ~70 lines of custom CSS
+
+- **Executive Summary Progress (`streamlit_app/Home.py`):**
+  - Added progress bar showing "Processing X/Y companies..."
+  - Displays current company name being summarized
+  - Shows warning if no data available to generate from
+  - Success message when complete
+  - `build_exec_blocks()` now accepts `progress_callback` parameter
+
+- **Email Delete Stats Fix (`app/email_matcher.py`):**
+  - Added `_decrement_sender_stats()` helper function
+  - `delete_email()` now decrements sender's received/processed/injected counts
+  - `rebuild_sender_stats()` filters out deleted emails
+  - Counts protected from going negative with `max(0, ...)`
+
+- **README Updates:**
+  - Documented email management features
+  - Added logs/ folder and deleted/ subfolder to project structure
+  - Updated Settings tab descriptions
+
+## Decisions Made
+- **Native st.tabs() over custom buttons:** Simpler code, consistent styling,
+  better accessibility. Custom CSS was fragile and hard to maintain.
+- **Progress callback pattern:** Allows UI to update during long-running
+  operations without modifying the core function's interface.
+- **Decrement on delete vs rebuild:** Updating stats incrementally is faster
+  than rebuilding from scratch. Rebuild is still available for data recovery.
+
+## Issues Encountered
+- **Git push timeouts:** Network issues caused several push attempts to hang.
+  Resolved by killing stuck processes and retrying.
+- **Rebase with unstaged changes:** Had to stash data files before pull --rebase.
+
+## Commits Made
+- 89086d4: Add progress bar to Executive Summary generation
+- d8ccc37: Replace main dashboard buttons with native st.tabs()
+- b0582a3: Add reportlab dependency for PDF generation
+- 349a1d9: Update README and add captain's log
+- 7f8890e: Filter deleted emails from stats rebuild
+- 35afc20: Update sender stats when email is deleted
+
+## Mistakes & Lessons
+- **Check if work is already done:** Almost re-committed already pushed changes.
+  Always check `git status` and `git log` first.
+- **Background processes can succeed silently:** The stuck git push eventually
+  worked, causing a conflict with later pushes.
+
+## Next Steps
+- Test Executive Summary with real data to verify progress bar
+- Consider caching summarize_point results to speed up regeneration
+- Add PDF generation progress indicator (currently instant)
+- Deploy to production
+
+================================================================================
+END OF LOG
+================================================================================
