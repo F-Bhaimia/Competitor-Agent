@@ -1752,10 +1752,13 @@ with tab_edits:
 
 # --------------------------- Tab: Executive Summary ---------------------------
 with tab_summary:
-    # Build date range label for display
+    # Build date range label from ACTUAL filtered data (not sidebar widget defaults)
     dr_label = ""
-    if date_from and date_to:
-        dr_label = f"{pd.Timestamp(date_from):%b %d, %Y} – {pd.Timestamp(date_to):%b %d, %Y}"
+    if not f.empty and "date_ref" in f.columns and f["date_ref"].notna().any():
+        actual_min = f["date_ref"].min()
+        actual_max = f["date_ref"].max()
+        if pd.notna(actual_min) and pd.notna(actual_max):
+            dr_label = f"{actual_min:%b %d, %Y} – {actual_max:%b %d, %Y}"
 
     st.subheader("Executive Summary")
     if dr_label:
@@ -1822,9 +1825,8 @@ with tab_summary:
             with st.container():
                 st.markdown(f"### {b['company']}")
                 st.caption(
-                    f"{b['posts']} posts during "
-                    f"{pd.Timestamp(date_from):%b %d, %Y} – {pd.Timestamp(date_to):%b %d, %Y}"
-                    if (date_from and date_to) else f"{b['posts']} posts"
+                    f"{b['posts']} posts during {dr_label}"
+                    if dr_label else f"{b['posts']} posts"
                 )
                 st.write(
                     f"**Impact mix:** High: {b['impact']['High']} • "
