@@ -468,13 +468,25 @@ def summarize_point(text: str, max_words: int = 50) -> str:
         print("Summarization failed:", e)
         return text[:300]  # fallback
 
-def build_exec_blocks(filtered_df: pd.DataFrame, max_highlights: int = 3):
-    """Create structured summary blocks from the current filtered data."""
+def build_exec_blocks(filtered_df: pd.DataFrame, max_highlights: int = 3, progress_callback=None):
+    """Create structured summary blocks from the current filtered data.
+
+    Args:
+        filtered_df: DataFrame with competitor data
+        max_highlights: Max highlight sentences per company
+        progress_callback: Optional callable(current, total, company_name) for progress updates
+    """
     blocks = []
     if filtered_df.empty:
         return blocks
 
-    for company, g in filtered_df.groupby("company"):
+    companies = list(filtered_df.groupby("company"))
+    total = len(companies)
+
+    for idx, (company, g) in enumerate(companies):
+        if progress_callback:
+            progress_callback(idx, total, company)
+
         posts = len(g)
 
         # Impact counts
@@ -510,6 +522,10 @@ def build_exec_blocks(filtered_df: pd.DataFrame, max_highlights: int = 3):
             "top_topics": top_topics,
             "highlights": refined
         })
+
+    if progress_callback:
+        progress_callback(total, total, "Done")
+
     return blocks
 
 def exec_blocks_to_pdf(blocks, daterange_label: str = "") -> bytes:
@@ -1770,9 +1786,32 @@ with tab_summary:
     if gen_click:
         # Build blocks from the CURRENT filtered frame (f)
         log_user_action(get_client_ip(), "exec_summary_gen", f"Generating executive summary for {len(f)} rows")
-        blocks = build_exec_blocks(f, max_highlights=3)
-        st.session_state["exec_blocks"] = blocks
-        log_user_action(get_client_ip(), "exec_summary_done", f"Generated {len(blocks)} company summaries")
+
+        # Check if there's data to process
+        companies = f["company"].nunique() if not f.empty else 0
+        if companies == 0:
+            st.warning("No data to generate summary from. Try adjusting your filters.")
+        else:
+            # Show progress bar
+            progress_bar = st.progress(0, text="Starting...")
+            status_text = st.empty()
+
+            def update_progress(current, total, company_name):
+                if total > 0:
+                    progress = current / total
+                    progress_bar.progress(progress, text=f"Processing {current}/{total} companies...")
+                    status_text.text(f"Summarizing: {company_name}")
+
+            blocks = build_exec_blocks(f, max_highlights=3, progress_callback=update_progress)
+            st.session_state["exec_blocks"] = blocks
+
+            # Clear progress indicators
+            progress_bar.empty()
+            status_text.empty()
+
+            log_user_action(get_client_ip(), "exec_summary_done", f"Generated {len(blocks)} company summaries")
+            st.success(f"Generated summaries for {len(blocks)} companies!")
+            st.rerun()
 
     if st.session_state["exec_blocks"]:
         for b in st.session_state["exec_blocks"]:
