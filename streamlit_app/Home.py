@@ -11,8 +11,12 @@ from collections import Counter
 from io import BytesIO
 from typing import Dict
 
+# Add project root to Python path for imports
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
 from dotenv import load_dotenv
-load_dotenv()  # Load .env file for API keys
+load_dotenv(PROJECT_ROOT / ".env")  # Load .env file from project root
 
 import pandas as pd
 import streamlit as st
@@ -1559,9 +1563,11 @@ with tab_dashboard:
         chart_min_date = fq_all["date_ref"].min()
         chart_max_date = fq_all["date_ref"].max()
 
-        # Default to current year to date
+        # Default to current year to date, but clamp within data range
         current_year_start = pd.Timestamp(f"{pd.Timestamp.now().year}-01-01", tz="UTC")
         default_start = max(chart_min_date, current_year_start)
+        # Ensure default_start doesn't exceed max_date
+        default_start = min(default_start, chart_max_date)
         default_end = chart_max_date
 
         # Date picker for chart range
